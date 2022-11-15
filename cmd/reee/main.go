@@ -1,16 +1,10 @@
 package main
 
-import (
-	"fmt"
-	"os"
+import "github.com/alexflint/go-arg"
 
-	"github.com/gogama/reee-evolution/cmd/reee/reeecmd"
-)
+type foo struct {
+}
 
 func main() {
-	err := reeecmd.Execute()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
-	}
+	arg.MustParse(&foo{})
 }
