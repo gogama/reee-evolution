@@ -5,6 +5,7 @@
 *.so
 *.dylib
 cmd/reee/reee
+cmd/reeed/reeed
 
 # Test binary, built with `go test -c`
 *.test

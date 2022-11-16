@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -17,9 +18,9 @@ type args struct {
 	ListCommand *listCommand `arg:"subcommand:list"`
 
 	// Global arguments.
-	Verbose bool   `arg:"-v,--verbose" help:"enable verbose logging"`
-	Network string `arg:"--net,env:REEE_NET" help:"daemon network"`
 	Address string `arg:"--addr,env:REEE_ADDR" help:"daemon address"`
+	Network string `arg:"--net,env:REEE_NET" help:"daemon network"`
+	Verbose bool   `arg:"-v,--verbose" help:"enable verbose logging"`
 }
 
 type subCommand interface {
@@ -31,16 +32,16 @@ type exitCoder interface {
 }
 
 func main() {
-	// Configure CLI.
+	// Configure command line interface.
 	network, address := protocol.DefaultNetAddr()
-	args := args{
+	a := args{
 		Network: network,
 		Address: address,
 	}
 
 	// Parse arguments. Exit early on parsing error, validation error,
 	// or a help or version request.
-	p := arg.MustParse(&args)
+	p := arg.MustParse(&a)
 
 	// Locate the sub-command to be executed.
 	var sub subCommand
@@ -51,18 +52,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO: Set up logger so we can do verbose error message logging.
-
-	// Connect to the daemon.
-	conn, err := net.Dial(args.Network, args.Address)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error failed to connect to daemon (network %s, address %s)\n", args.Network, args.Address)
-		// TODO: log verbose log of real error message here.
-		os.Exit(1)
-	}
-
-	// Execute the sub-command.
-	err = sub.Exec(conn)
+	// Run the client.
+	err := client(os.Stderr, sub, &a)
 	if err != nil {
 		msg := err.Error()
 		if strings.HasSuffix(msg, "\n") {
@@ -78,6 +69,20 @@ func main() {
 		}
 		os.Exit(code)
 	}
+}
+
+func client(w io.Writer, sub subCommand, a *args) error {
+	// TODO: Set up logger so we can do verbose error message logging.
+
+	// Connect to the daemon.
+	conn, err := net.Dial(a.Network, a.Address)
+	if err != nil {
+		return fmt.Errorf("failed to connect to daemon (network %s, address %s)\n", a.Network, a.Address)
+		// TODO: log verbose log of real error message here.
+	}
+
+	// Execute the sub-command.
+	return sub.Exec(conn)
 }
 
 func (a *args) Version() string {
