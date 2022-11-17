@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gogama/reee-evolution/log"
@@ -41,36 +43,97 @@ type EnvelopeCache interface {
 
 type Daemon struct {
 	Listener net.Listener
-	Logger   log.Printer // TODO: Should be something that supports verbosity levels.
+	Logger   log.Printer
 	Groups   map[string][]rule.Rule
 	Hist     History
 	Cache    EnvelopeCache
-	lock     sync.RWMutex
+
+	lock      sync.RWMutex
+	ctx       context.Context
+	cancel    context.CancelFunc
+	numConns  atomic.Int64
+	closeOnce sync.Once
+	closeErr  error
 }
 
-func (d *Daemon) Serve() error {
-	// Synchronous, and you can `go d.Serve()` it if you want async.
+var ErrStopped = errors.New("daemon: stopped")
 
+func (d *Daemon) Serve() error {
+	d.init()
 	defer func() {
-		_ = d.Listener.Close()
+		_ = d.close()
 	}()
+	var tempDelay time.Duration // how long to sleep on accept failure
 	for {
 		conn, err := d.Listener.Accept()
 		if err != nil {
-			// TODO: Log fatal error.
-			// d.Logger.Fatal("accept error:", err)
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				if tempDelay == 0 {
+					tempDelay = 5 * time.Millisecond
+				} else {
+					tempDelay *= 2
+				}
+				if max := 1 * time.Second; tempDelay > max {
+					tempDelay = max
+				}
+				log.Normal(d.Logger, "daemon: accept error: %v; retrying in %v", err, tempDelay)
+				timer := time.NewTimer(tempDelay)
+				select {
+				case <-timer.C:
+					continue
+				case <-d.ctx.Done():
+					timer.Stop()
+					return ErrStopped
+				}
+			}
+			return err
 		}
-
+		d.numConns.Add(1)
+		tempDelay = 0
 		go d.handle(conn)
 	}
 }
 
-func (d *Daemon) Shutdown(ctx context.Context) error {
-	// Analogous to http.Server's Shutdown.
-	return nil
+func (d *Daemon) close() error {
+	d.closeOnce.Do(func() {
+		d.closeErr = d.Listener.Close()
+	})
+	return d.closeErr
+}
+
+func (d *Daemon) Stop(ctx context.Context) error {
+	d.cancel()
+	err := d.close()
+
+	timer := time.NewTimer(5 * time.Millisecond)
+	defer timer.Stop()
+	for d.numConns.Load() > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			timer.Reset(5 * time.Millisecond)
+		}
+	}
+
+	return err
+}
+
+func (d *Daemon) init() {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	if d.ctx != nil {
+		panic("daemon: reused")
+	}
+	d.ctx, d.cancel = context.WithCancel(context.Background())
 }
 
 func (d *Daemon) handle(conn net.Conn) {
+	defer func() {
+		_ = conn.Close()
+		d.numConns.Add(-1)
+	}()
+
 	cmd, lvl, args, err := protocol.ReadCommand(conn)
 	var isEOF bool
 	if err == io.EOF {
@@ -165,8 +228,7 @@ func handleEval(ctx *cmdContext) error {
 	}
 
 	for i := range rules {
-		// TODO: Give the rule a logger
-		err = rules[i].Eval(msg)
+		err = rules[i].Eval(ctx, ctx, msg)
 		// If it is code say 0, continue otherwise
 	}
 

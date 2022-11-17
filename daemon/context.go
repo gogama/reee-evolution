@@ -1,15 +1,16 @@
 package daemon
 
 import (
-	"net"
-	"sync"
-
+	"context"
 	"github.com/gofrs/uuid"
 	"github.com/gogama/reee-evolution/log"
 	"github.com/gogama/reee-evolution/protocol"
+	"net"
+	"sync"
 )
 
 type cmdContext struct {
+	context.Context
 	d     *Daemon
 	cmdID string
 	conn  net.Conn
