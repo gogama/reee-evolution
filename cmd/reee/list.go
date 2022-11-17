@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/gogama/reee-evolution/log"
+	"io"
 	"net"
 )
 
@@ -12,6 +13,6 @@ func (cmd *listCommand) Validate() error {
 	return nil
 }
 
-func (cmd *listCommand) Exec(cmdID string, logger log.Printer, conn net.Conn) error {
+func (cmd *listCommand) Exec(cmdID string, logger log.Printer, ins io.Reader, outs io.Writer, conn net.Conn) error {
 	return nil
 }

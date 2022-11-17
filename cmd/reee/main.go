@@ -31,7 +31,7 @@ func (a *args) Version() string {
 
 type subCommand interface {
 	Validate() error
-	Exec(cmdID string, logger log.Printer, conn net.Conn) error
+	Exec(cmdID string, logger log.Printer, ins io.Reader, outs io.Writer, conn net.Conn) error
 }
 
 type exitCoder interface {
@@ -60,7 +60,7 @@ func main() {
 	}
 
 	// Run the executeCommand.
-	err := executeCommand(os.Stderr, sub, &a)
+	err := executeCommand(os.Stdin, os.Stdout, os.Stderr, sub, &a)
 	if err != nil {
 		msg := err.Error()
 		if strings.HasSuffix(msg, "\n") {
@@ -78,7 +78,7 @@ func main() {
 	}
 }
 
-func executeCommand(w io.Writer, sub subCommand, a *args) error {
+func executeCommand(ins io.Reader, outs, errs io.Writer, sub subCommand, a *args) error {
 	// Validate that the command arguments are valid before proceeding.
 	if err := sub.Validate(); err != nil {
 		return err
@@ -89,7 +89,7 @@ func executeCommand(w io.Writer, sub subCommand, a *args) error {
 	if a.Verbose {
 		lvl = log.VerboseLevel
 	}
-	logger := log.WithWriter(lvl, w)
+	logger := log.WithWriter(lvl, errs)
 
 	// Connect to the daemon.
 	conn, err := net.Dial(a.Network, a.Address)
@@ -112,5 +112,5 @@ func executeCommand(w io.Writer, sub subCommand, a *args) error {
 	//       wrapping the conn.
 
 	// Execute the sub-command.
-	return sub.Exec(cmdID.String(), logger, conn)
+	return sub.Exec(cmdID.String(), logger, ins, outs, conn)
 }
