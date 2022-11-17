@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"github.com/gofrs/uuid"
+	"github.com/gogama/reee-evolution/log"
 	"io"
 	"net"
 	"os"
@@ -23,8 +25,13 @@ type args struct {
 	Verbose bool   `arg:"-v,--verbose" help:"enable verbose logging"`
 }
 
+func (a *args) Version() string {
+	return version.OfCmd()
+}
+
 type subCommand interface {
-	Exec(conn net.Conn) error
+	Validate() error
+	Exec(cmdID string, logger log.Printer, conn net.Conn) error
 }
 
 type exitCoder interface {
@@ -52,8 +59,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Run the client.
-	err := client(os.Stderr, sub, &a)
+	// Run the executeCommand.
+	err := executeCommand(os.Stderr, sub, &a)
 	if err != nil {
 		msg := err.Error()
 		if strings.HasSuffix(msg, "\n") {
@@ -71,20 +78,39 @@ func main() {
 	}
 }
 
-func client(w io.Writer, sub subCommand, a *args) error {
-	// TODO: Set up logger so we can do verbose error message logging.
+func executeCommand(w io.Writer, sub subCommand, a *args) error {
+	// Validate that the command arguments are valid before proceeding.
+	if err := sub.Validate(); err != nil {
+		return err
+	}
+
+	// Initialize logging.
+	lvl := log.NormalLevel
+	if a.Verbose {
+		lvl = log.VerboseLevel
+	}
+	logger := log.WithWriter(lvl, w)
 
 	// Connect to the daemon.
 	conn, err := net.Dial(a.Network, a.Address)
 	if err != nil {
+		log.Verbose(logger, "error: %s", err)
 		return fmt.Errorf("failed to connect to daemon (network %s, address %s)\n", a.Network, a.Address)
-		// TODO: log verbose log of real error message here.
 	}
+	defer func() {
+		_ = conn.Close()
+	}()
+
+	// Allocate an ID for the command to execute.
+	cmdID, err := uuid.NewV6()
+	if err != nil {
+		return err
+	}
+	log.Verbose(logger, "command ID: %s", cmdID)
+
+	// TODO: We will want to put wire logging right here, maybe by
+	//       wrapping the conn.
 
 	// Execute the sub-command.
-	return sub.Exec(conn)
-}
-
-func (a *args) Version() string {
-	return version.OfCmd()
+	return sub.Exec(cmdID.String(), logger, conn)
 }

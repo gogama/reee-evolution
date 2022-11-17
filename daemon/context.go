@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"github.com/gofrs/uuid"
 	"github.com/gogama/reee-evolution/log"
 	"github.com/gogama/reee-evolution/protocol"
 	"net"
@@ -12,33 +11,29 @@ import (
 type cmdContext struct {
 	context.Context
 	d     *Daemon
-	cmdID string
 	conn  net.Conn
+	cmdID string
 	args  string
 	isEOF bool
 	lvl   [3]log.Level
 }
 
-func newCmdContext(d *Daemon, conn net.Conn, args string, isEOF bool, lvl log.Level) (cmdContext, error) {
-	cmdID, err := uuid.NewV6()
-	if err != nil {
-		return cmdContext{}, err
-	}
+func newCmdContext(d *Daemon, conn net.Conn, cmd protocol.Command, isEOF bool) cmdContext {
 	ctx := cmdContext{
 		d:     d,
-		cmdID: cmdID.String(),
 		conn:  conn,
-		args:  args,
+		cmdID: cmd.ID,
+		args:  cmd.Args,
 		isEOF: isEOF,
-		lvl:   [3]log.Level{lvl, lvl, log.NormalLevel},
+		lvl:   [3]log.Level{cmd.Level, cmd.Level, log.NormalLevel},
 	}
 	if leveler, ok := d.Logger.(log.Leveler); ok {
 		ctx.lvl[2] = leveler.Level()
-		if ctx.lvl[2] > lvl {
+		if ctx.lvl[2] > cmd.Level {
 			ctx.lvl[0] = ctx.lvl[2]
 		}
 	}
-	return ctx, nil
+	return ctx
 }
 
 func (ctx *cmdContext) Print(lvl log.Level, msg string) {

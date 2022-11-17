@@ -1,11 +1,10 @@
 package daemon
 
 import (
+	"bufio"
 	"bytes"
 	"context"
-	"crypto/md5"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -63,6 +62,7 @@ func (d *Daemon) Serve() error {
 	defer func() {
 		_ = d.close()
 	}()
+	var connID uint64
 	var tempDelay time.Duration // how long to sleep on accept failure
 	for {
 		conn, err := d.Listener.Accept()
@@ -90,7 +90,8 @@ func (d *Daemon) Serve() error {
 		}
 		d.numConns.Add(1)
 		tempDelay = 0
-		go d.handle(conn)
+		go d.handle(connID, conn)
+		connID++
 	}
 }
 
@@ -128,29 +129,30 @@ func (d *Daemon) init() {
 	d.ctx, d.cancel = context.WithCancel(context.Background())
 }
 
-func (d *Daemon) handle(conn net.Conn) {
+func (d *Daemon) handle(connID uint64, conn net.Conn) {
 	defer func() {
 		_ = conn.Close()
 		d.numConns.Add(-1)
 	}()
 
-	cmd, lvl, args, err := protocol.ReadCommand(conn)
+	r := bufio.NewReader(conn)
+
+	cmd, err := protocol.ReadCommand(r)
 	var isEOF bool
 	if err == io.EOF {
 		isEOF = true
 	} else if err != nil {
-		// TODO: Do something drastic
+		log.Normal(d.Logger, "error: [conn %d]: %s", connID, err)
+		return
 	}
 
-	ctx, err := newCmdContext(d, conn, args, isEOF, lvl)
-	if err != nil {
-		// TODO: do something
-	}
+	ctx := newCmdContext(d, conn, cmd, isEOF)
+	log.Verbose(d.Logger, "[conn %d, cmd %s]: received %v", connID, cmd.ID, cmd)
 
-	switch cmd {
-	case protocol.ListCommand:
+	switch cmd.Type {
+	case protocol.ListCommandType:
 		err = handleList(&ctx)
-	case protocol.EvalCommand:
+	case protocol.EvalCommandType:
 		err = handleEval(&ctx)
 	default:
 		// TODO: Unsupported command.
@@ -242,8 +244,10 @@ func getMsg(ctx *cmdContext, key string) *enmime.Envelope {
 }
 
 func parseMsg(ctx *cmdContext, buf *bytes.Buffer) (*enmime.Envelope, error) {
-	key := fmt.Sprintf("%x", md5.Sum(buf.Bytes()))
-	msg := getMsg(ctx, key)
+	//key := fmt.Sprintf("%x", md5.Sum(buf.Bytes()))
+	// FIXME: Ensure cache works. Line below commented out because currently cache is always nil.
+	// msg := getMsg(ctx, key)
+	var msg *enmime.Envelope
 	if msg == nil {
 		var err error
 		msg, err = enmime.NewParser().ReadEnvelope(buf)
@@ -252,7 +256,8 @@ func parseMsg(ctx *cmdContext, buf *bytes.Buffer) (*enmime.Envelope, error) {
 		}
 		ctx.d.lock.Lock()
 		defer ctx.d.lock.Unlock()
-		ctx.d.Cache.Put(key, msg, int64(buf.Len()))
+		// FIXME: Ensure cache works.
+		//ctx.d.Cache.Put(key, msg, int64(buf.Len()))
 	}
 	return msg, nil
 }

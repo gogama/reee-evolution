@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/gogama/reee-evolution/cmd/reeeuse"
 	"github.com/gogama/reee-evolution/daemon"
 	"github.com/gogama/reee-evolution/rule"
 	"io"
@@ -71,7 +72,7 @@ func runDaemon(parent context.Context, w io.Writer, a *args) error {
 	logger := log.WithWriter(lvl, w)
 
 	// Get a context that ends when we get a terminating signal.
-	signalCtx, stop := signalContext(parent)
+	signalCtx, stop := reeeuse.SignalContext(parent)
 
 	// Load the rules.
 	groups, err := loadRuleGroups(signalCtx, logger, a)

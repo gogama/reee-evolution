@@ -1,7 +1,7 @@
 //go:build !windows
 // +build !windows
 
-package main
+package reeeuse
 
 import (
 	"context"
@@ -9,6 +9,6 @@ import (
 	"os/signal"
 )
 
-func signalContext(parent context.Context) (ctx context.Context, stop context.CancelFunc) {
+func SignalContext(parent context.Context) (ctx context.Context, stop context.CancelFunc) {
 	return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 }
