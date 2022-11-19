@@ -9,5 +9,5 @@ import (
 
 type Rule interface {
 	fmt.Stringer
-	Eval(ctx context.Context, logger log.Printer, msg *enmime.Envelope) error
+	Eval(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error)
 }

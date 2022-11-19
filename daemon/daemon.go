@@ -240,9 +240,12 @@ func handleEval(ctx *cmdContext) error {
 		// TODO:
 	}
 
-	for i := range rules {
-		err = rules[i].Eval(ctx, ctx, msg)
-		// If it is code say 0, continue otherwise
+	var stop bool
+	for i := 0; i < len(rules) && !stop; i++ {
+		stop, err = rules[i].Eval(ctx, ctx, msg)
+		if err != nil {
+			// TODO: handle rule evaluation error
+		}
 	}
 
 	return nil
