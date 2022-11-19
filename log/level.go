@@ -34,7 +34,8 @@ func (lvl *Level) String() string {
 func (lvl *Level) MarshalText() (text []byte, err error) {
 	i := int(*lvl) + 1
 	if 0 <= i && i < len(level) {
-		text = level[i]
+		text = make([]byte, len(level[i]))
+		copy(text, level[i])
 	} else {
 		err = fmt.Errorf("log: invalid level value: %d", lvl)
 	}

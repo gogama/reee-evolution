@@ -5,7 +5,6 @@ import (
 	"github.com/gogama/reee-evolution/log"
 	"github.com/gogama/reee-evolution/protocol"
 	"io"
-	"net"
 	"time"
 )
 
@@ -19,7 +18,7 @@ func (cmd *evalCommand) Validate() error {
 	return nil
 }
 
-func (cmd *evalCommand) Exec(cmdID string, logger log.Printer, ins io.Reader, _ io.Writer, conn net.Conn) error {
+func (cmd *evalCommand) Exec(cmdID string, logger log.Printer, ins io.Reader, _ io.Writer, r *bufio.Reader, w *bufio.Writer) error {
 	pc := protocol.Command{
 		Type:  protocol.EvalCommandType,
 		ID:    cmdID,
@@ -29,7 +28,6 @@ func (cmd *evalCommand) Exec(cmdID string, logger log.Printer, ins io.Reader, _ 
 	if len(cmd.Rule) > 0 {
 		pc.Args += " " + cmd.Rule
 	}
-	w := bufio.NewWriter(conn)
 
 	start := time.Now()
 	err := protocol.WriteCommand(w, pc)
@@ -37,7 +35,7 @@ func (cmd *evalCommand) Exec(cmdID string, logger log.Printer, ins io.Reader, _ 
 		return err
 	}
 	elapsed := time.Since(start)
-	log.Verbose(logger, "wrote %s command for command ID %s in %d.", protocol.EvalCommandType, cmdID, elapsed)
+	log.Verbose(logger, "wrote %s command for cmd %s in %s.", protocol.EvalCommandType, cmdID, elapsed)
 
 	start = time.Now()
 	n, err := io.Copy(w, ins)
@@ -45,9 +43,9 @@ func (cmd *evalCommand) Exec(cmdID string, logger log.Printer, ins io.Reader, _ 
 		return err
 	}
 	elapsed = time.Since(start)
-	log.Verbose(logger, "copied %d bytes from input to connection in %d.", n, elapsed)
+	log.Verbose(logger, "copied %d bytes from input to connection in %s.", n, elapsed)
 
-	// TODO: Read back log messages.
+	// TODO: Read back result.
 
 	return nil
 }

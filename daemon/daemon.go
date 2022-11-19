@@ -152,49 +152,62 @@ func (d *Daemon) handle(connID uint64, conn net.Conn) {
 	ctx := newCmdContext(d, connID, r, w, cmd, isEOF)
 	ctx.Verbose("daemon received %v", cmd)
 
+	var data []byte
 	switch cmd.Type {
 	case protocol.ListCommandType:
-		err = handleList(&ctx)
+		data, err = handleList(&ctx)
 	case protocol.EvalCommandType:
 		err = handleEval(&ctx)
 	default:
-		err = fmt.Errorf("unhandled command type: %s", cmd.Type)
+		panic(fmt.Sprintf("daemon: unhandled command type: %d", cmd.Type))
 	}
 
-	if err != nil {
-		protocol.WriteResult(w, protocol.ErrorResultType, err.Error())
+	if connErr, ok := err.(connError); ok {
+		log.Normal(d.Logger, ctx.logPrefix+"error: "+connErr.Error())
+		return
+	} else if err != nil {
+		log.Verbose(d.Logger, ctx.logPrefix+"error: "+err.Error())
+		err = protocol.WriteError(w, err.Error())
+		if err != nil {
+			log.Normal(d.Logger, ctx.logPrefix+"error: "+err.Error())
+		}
+	} else {
+		err = protocol.WriteSuccess(w, data)
+		if err != nil {
+			log.Normal(d.Logger, ctx.logPrefix+"error: "+err.Error())
+		} else {
+			log.Verbose(d.Logger, ctx.logPrefix+"success: %d bytes of result data written", len(data))
+		}
 	}
 }
 
-func handleList(ctx *cmdContext) error {
+type connError struct {
+	err error
+}
+
+func (err connError) Error() string {
+	return err.err.Error()
+}
+
+func handleList(ctx *cmdContext) ([]byte, error) {
 	if len(ctx.args) > 0 {
-		// TODO: error
-	} else if ctx.isEOF {
-		// TODO: error
+		return nil, fmt.Errorf("%s command not allowed arguments but had %q", protocol.ListCommandType, ctx.args)
 	}
 
+	// TODO: delete below temporary line
+	ctx.Verbose("buffering contents for %d groups : TODO: delete this", len(ctx.d.Groups))
+
+	var b bytes.Buffer
 	for group, rules := range ctx.d.Groups {
-		_, err := ctx.w.Write([]byte(group))
-		if err != nil {
-			// TODO
-		}
+		_, _ = b.Write([]byte(group))
 		for _, r := range rules {
-			_, err = ctx.w.Write([]byte(" "))
-			if err != nil {
-				// TODO
-			}
-			_, err = ctx.w.Write([]byte(r.String()))
-			if err != nil {
-				// TODO
-			}
+			_ = b.WriteByte(' ')
+			_, _ = b.WriteString(r.String())
 		}
-		_, err = ctx.w.Write([]byte("\n"))
-		if err != nil {
-			// TODO
-		}
+		b.WriteByte('\n')
 	}
 
-	return nil
+	return b.Bytes(), nil
 }
 
 func handleEval(ctx *cmdContext) error {

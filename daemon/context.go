@@ -19,6 +19,7 @@ type cmdContext struct {
 	args      string
 	isEOF     bool
 	logPrefix string
+	logErr    error
 	lvl       [3]log.Level
 }
 
@@ -62,12 +63,12 @@ func (ctx *cmdContext) Print(lvl log.Level, msg string) {
 		return
 	}
 	var wg sync.WaitGroup
-	if lvl <= ctx.lvl[1] {
+	if lvl <= ctx.lvl[1] && ctx.logErr == nil {
 		wg.Add(1)
 		go func() {
-			msg = lvl.String() + " " + msg
-			err := protocol.WriteResult(ctx.w, protocol.LogResultType, msg)
+			err := protocol.WriteLog(ctx.w, lvl, msg)
 			if err != nil {
+				ctx.logErr = err
 				log.Normal(ctx.d.Logger, "[conn %d, cmd %s]: failed to log message: %s", ctx.connID, ctx.cmdID, err.Error())
 				log.Verbose(ctx.d.Logger, "[conn %d, cmd %s]: \tlog message: %s", ctx.connID, ctx.cmdID, msg)
 			}

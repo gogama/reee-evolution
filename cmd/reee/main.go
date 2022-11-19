@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"github.com/gofrs/uuid"
 	"github.com/gogama/reee-evolution/log"
@@ -31,7 +32,7 @@ func (a *args) Version() string {
 
 type subCommand interface {
 	Validate() error
-	Exec(cmdID string, logger log.Printer, ins io.Reader, outs io.Writer, conn net.Conn) error
+	Exec(cmdID string, logger log.Printer, ins io.Reader, outs io.Writer, r *bufio.Reader, w *bufio.Writer) error
 }
 
 type exitCoder interface {
@@ -98,7 +99,10 @@ func executeCommand(ins io.Reader, outs, errs io.Writer, sub subCommand, a *args
 		return fmt.Errorf("failed to connect to daemon (network %s, address %s)\n", a.Network, a.Address)
 	}
 	defer func() {
-		_ = conn.Close()
+		closeErr := conn.Close()
+		if closeErr != nil {
+			log.Normal(logger, "error: failed to close connection: %s", closeErr)
+		}
 	}()
 
 	// Allocate an ID for the command to execute.
@@ -111,6 +115,10 @@ func executeCommand(ins io.Reader, outs, errs io.Writer, sub subCommand, a *args
 	// TODO: We will want to put wire logging right here, maybe by
 	//       wrapping the conn.
 
+	// Buffer the connection.
+	r := bufio.NewReader(conn)
+	w := bufio.NewWriter(conn)
+
 	// Execute the sub-command.
-	return sub.Exec(cmdID.String(), logger, ins, outs, conn)
+	return sub.Exec(cmdID.String(), logger, ins, outs, r, w)
 }

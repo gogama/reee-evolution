@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/gogama/reee-evolution/cmd/reeeuse"
 	"github.com/gogama/reee-evolution/daemon"
+	"github.com/jhillyerd/enmime"
 	"io"
 	"net"
 	"os"
@@ -131,6 +133,57 @@ func runDaemon(parent context.Context, r io.Reader, w io.Writer, a *args) error 
 }
 
 func loadRuleGroups(ctx context.Context, logger log.Printer, a *args) (map[string][]daemon.Rule, error) {
-	// TODO: Go load the rule groups.
-	return nil, nil
+	// TODO: Load some real rule groups
+
+	return map[string][]daemon.Rule{
+		"foo": {
+			&tempDummyRule{
+				name: "bar",
+				f: func(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error) {
+					log.Verbose(logger, "bar rule returns (false, nil)")
+					return false, nil
+				},
+			},
+			&tempDummyRule{
+				name: "baz",
+				f: func(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error) {
+					log.Verbose(logger, "baz rule returns (true, nil)")
+					return true, nil
+				},
+			},
+			&tempDummyRule{
+				name: "qux",
+				f: func(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error) {
+					panic("qux rule does not get called...")
+				},
+			},
+		},
+		"hello": {
+			&tempDummyRule{
+				name: "world",
+				f: func(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error) {
+					return false, errors.New("world rule fails with error")
+				},
+			},
+		},
+	}, nil
+}
+
+// todo: delete
+type tempDummyRuleFunc func(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error)
+
+// todo: delete
+type tempDummyRule struct {
+	name string
+	f    tempDummyRuleFunc
+}
+
+// todo: delete
+func (todoDelete *tempDummyRule) String() string {
+	return todoDelete.name
+}
+
+// todo: delete
+func (todoDelete *tempDummyRule) Eval(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error) {
+	return todoDelete.Eval(ctx, logger, msg)
 }
