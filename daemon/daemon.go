@@ -5,15 +5,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gogama/reee-evolution/log"
 	"github.com/gogama/reee-evolution/protocol"
-	"github.com/gogama/reee-evolution/rule"
 	"github.com/jhillyerd/enmime"
 )
 
@@ -43,7 +44,7 @@ type EnvelopeCache interface {
 type Daemon struct {
 	Listener net.Listener
 	Logger   log.Printer
-	Groups   map[string][]rule.Rule
+	Groups   map[string][]Rule
 	Hist     History
 	Cache    EnvelopeCache
 
@@ -146,8 +147,10 @@ func (d *Daemon) handle(connID uint64, conn net.Conn) {
 		return
 	}
 
-	ctx := newCmdContext(d, conn, cmd, isEOF)
-	log.Verbose(d.Logger, "[conn %d, cmd %s]: received %v", connID, cmd.ID, cmd)
+	w := bufio.NewWriter(conn)
+
+	ctx := newCmdContext(d, connID, r, w, cmd, isEOF)
+	ctx.Verbose("daemon received %v", cmd)
 
 	switch cmd.Type {
 	case protocol.ListCommandType:
@@ -155,7 +158,11 @@ func (d *Daemon) handle(connID uint64, conn net.Conn) {
 	case protocol.EvalCommandType:
 		err = handleEval(&ctx)
 	default:
-		// TODO: Unsupported command.
+		err = fmt.Errorf("unhandled command type: %s", cmd.Type)
+	}
+
+	if err != nil {
+		protocol.WriteResult(w, protocol.ErrorResultType, err.Error())
 	}
 }
 
@@ -167,21 +174,21 @@ func handleList(ctx *cmdContext) error {
 	}
 
 	for group, rules := range ctx.d.Groups {
-		_, err := ctx.conn.Write([]byte(group))
+		_, err := ctx.w.Write([]byte(group))
 		if err != nil {
 			// TODO
 		}
 		for _, r := range rules {
-			_, err = ctx.conn.Write([]byte(" "))
+			_, err = ctx.w.Write([]byte(" "))
 			if err != nil {
 				// TODO
 			}
-			_, err = ctx.conn.Write([]byte(r.String()))
+			_, err = ctx.w.Write([]byte(r.String()))
 			if err != nil {
 				// TODO
 			}
 		}
-		_, err = ctx.conn.Write([]byte("\n"))
+		_, err = ctx.w.Write([]byte("\n"))
 		if err != nil {
 			// TODO
 		}
@@ -191,19 +198,23 @@ func handleList(ctx *cmdContext) error {
 }
 
 func handleEval(ctx *cmdContext) error {
-	// TODO: Input should be something like: eval <group> <verbosity> [<rule>]
 	// TODO: Output should be lines like "log [text]" or "error [text]" or "success [code]"
 
-	// var verbosity int TODO
-	var g, r string
-	var rules []rule.Rule
+	g, r, found := strings.Cut(ctx.args, " ")
+	if !found {
+		g = ctx.args
+	}
+	ctx.Verbose("group: %s", g)
+
+	var rules []Rule
 	var ok bool
 
 	if rules, ok = ctx.d.Groups[g]; !ok {
-		// TODO
+		return fmt.Errorf("group not found: %s", g)
 	}
 
 	if r != "" {
+		ctx.Verbose("rule: %s", r)
 		for i := range rules {
 			if r == rules[i].String() {
 				rules[0] = rules[i]
@@ -218,7 +229,7 @@ func handleEval(ctx *cmdContext) error {
 
 	var buf bytes.Buffer
 	if !ctx.isEOF {
-		_, err := io.Copy(&buf, ctx.conn)
+		_, err := io.Copy(&buf, ctx.r)
 		if err != nil {
 			// TODO
 		}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/gogama/reee-evolution/cmd/reeeuse"
 	"github.com/gogama/reee-evolution/daemon"
-	"github.com/gogama/reee-evolution/rule"
 	"io"
 	"net"
 	"os"
@@ -131,7 +130,7 @@ func runDaemon(parent context.Context, r io.Reader, w io.Writer, a *args) error 
 	return err
 }
 
-func loadRuleGroups(ctx context.Context, logger log.Printer, a *args) (map[string][]rule.Rule, error) {
+func loadRuleGroups(ctx context.Context, logger log.Printer, a *args) (map[string][]daemon.Rule, error) {
 	// TODO: Go load the rule groups.
 	return nil, nil
 }

@@ -1,18 +1,45 @@
 package protocol
 
-import "io"
+import (
+	"bufio"
+	"io"
+)
 
 type ResultType int
 
 const (
-	DataResultType ResultType = iota
+	SuccessResultType ResultType = iota
+	ErrorResultType
 	LogResultType
 )
 
-func WriteResult(w io.Writer, rt ResultType, args string) error {
-	// TODO: Should newlines be changed to nulls in the args to keep it line-oriented?
-	// e.g. use case is multi-line log message
-	return nil
+var resultType = [][]byte{
+	// Request commands from client to Daemon.
+	[]byte("success"),
+	[]byte("error"),
+	[]byte("log"),
+}
+
+func WriteResult(w *bufio.Writer, rt ResultType, args string) error {
+	_, err := w.Write(resultType[rt])
+	if err != nil {
+		return err
+	}
+	if args != "" {
+		err = w.WriteByte(' ')
+		if err != nil {
+			return err
+		}
+		_, err = w.WriteString(args)
+		if err != nil {
+			return err
+		}
+	}
+	err = w.WriteByte('\n')
+	if err != nil {
+		return err
+	}
+	return w.Flush()
 }
 
 func ReadResult(r io.Reader) (rt ResultType, args string, err error) {
