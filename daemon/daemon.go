@@ -194,18 +194,19 @@ func handleList(ctx *cmdContext) ([]byte, error) {
 		return nil, fmt.Errorf("%s command not allowed arguments but had %q", protocol.ListCommandType, ctx.args)
 	}
 
-	// TODO: delete below temporary line
-	ctx.Verbose("buffering contents for %d groups : TODO: delete this", len(ctx.d.Groups))
-
 	var b bytes.Buffer
+	var n int
 	for group, rules := range ctx.d.Groups {
 		_, _ = b.Write([]byte(group))
 		for _, r := range rules {
+			n++
 			_ = b.WriteByte(' ')
 			_, _ = b.WriteString(r.String())
 		}
 		b.WriteByte('\n')
 	}
+
+	ctx.Verbose("buffered %d groups and %d rules in %d bytes", len(ctx.d.Groups), n, b.Len())
 
 	return b.Bytes(), nil
 }
