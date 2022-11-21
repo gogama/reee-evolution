@@ -185,5 +185,5 @@ func (todoDelete *tempDummyRule) String() string {
 
 // todo: delete
 func (todoDelete *tempDummyRule) Eval(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error) {
-	return todoDelete.Eval(ctx, logger, msg)
+	return todoDelete.f(ctx, logger, msg)
 }
