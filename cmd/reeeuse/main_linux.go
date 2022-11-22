@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"syscall"
 )
 
 func SignalContext(parent context.Context) (ctx context.Context, stop context.CancelFunc) {
