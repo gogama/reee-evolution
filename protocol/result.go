@@ -4,9 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/gogama/reee-evolution/log"
 	"io"
 	"strconv"
+
+	"github.com/gogama/reee-evolution/log"
 )
 
 type ResultType int
@@ -68,6 +69,10 @@ func WriteError(w *bufio.Writer, msg string) error {
 		return err
 	}
 	_, err = w.WriteString(msg)
+	if err != nil {
+		return err
+	}
+	err = w.WriteByte('\n')
 	if err != nil {
 		return err
 	}

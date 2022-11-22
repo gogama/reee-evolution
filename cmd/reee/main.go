@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/gofrs/uuid"
-	"github.com/gogama/reee-evolution/log"
 	"io"
 	"net"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/gofrs/uuid"
+	"github.com/gogama/reee-evolution/log"
 
 	"github.com/alexflint/go-arg"
 	"github.com/gogama/reee-evolution/protocol"
@@ -40,12 +42,27 @@ type exitCoder interface {
 }
 
 func main() {
+	exitCode := 1      // Status exitCode with which to exit.
+	var exitErr string // Final error message to exit with
+	var a args         // Parsed command line arguments
+
+	// Track execution time and exit with final exit exitCode.
+	start := time.Now()
+	defer func() {
+		if a.Verbose {
+			elapsed := time.Since(start)
+			fmt.Fprintf(os.Stderr, "total elapsed time: %s\n", elapsed)
+		}
+		if exitCode != 0 && exitErr != "" {
+			fmt.Fprintln(os.Stderr, "error:", exitErr)
+			os.Exit(exitCode)
+		} else if exitCode != 0 || exitErr != "" {
+			panic(fmt.Sprintf("invalid exit state. code: %d, err: %q", exitCode, exitErr))
+		}
+	}()
+
 	// Configure command line interface.
-	network, address := protocol.DefaultNetAddr()
-	a := args{
-		Network: network,
-		Address: address,
-	}
+	a.Network, a.Address = protocol.DefaultNetAddr()
 
 	// Parse arguments. Exit early on parsing error, validation error,
 	// or a help or version request.
@@ -56,8 +73,8 @@ func main() {
 	var ok bool
 	if sub, ok = p.Subcommand().(subCommand); !ok {
 		p.WriteUsage(os.Stderr)
-		fmt.Fprintln(os.Stderr, "error: command is required")
-		os.Exit(1)
+		exitErr = "command is required"
+		return
 	}
 
 	// Run the executeCommand.
@@ -68,15 +85,17 @@ func main() {
 			msg = msg[:len(msg)-1]
 		}
 		if msg != "" {
-			fmt.Fprintf(os.Stderr, "error: %s\n", msg)
+			exitErr = msg
 		}
 		var coder exitCoder
-		code := 1
 		if coder, ok = err.(exitCoder); ok {
-			code = coder.Code()
+			exitCode = coder.Code()
 		}
-		os.Exit(code)
+		return
 	}
+
+	// Getting here indicates success.
+	exitCode = 0
 }
 
 func executeCommand(ins io.Reader, outs, errs io.Writer, sub subCommand, a *args) error {

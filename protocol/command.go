@@ -4,8 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/gogama/reee-evolution/log"
 	"io"
+
+	"github.com/gogama/reee-evolution/log"
 )
 
 type CommandType int
@@ -77,6 +78,7 @@ func ReadCommand(r *bufio.Reader) (cmd Command, err error) {
 	line, err := r.ReadBytes('\n')
 	if err == io.EOF {
 		err = fmt.Errorf("protocol: read command: premature EOF before EOL after %d bytes", len(line))
+		return
 	} else if err != nil {
 		return
 	}
@@ -121,7 +123,7 @@ func ReadCommand(r *bufio.Reader) (cmd Command, err error) {
 		err = fmt.Errorf("protocol: read command: invalid log level [%s] in [%s]", rem[0:p], line)
 		return
 	}
-	rem = rem[p+1:]
+	rem = rem[p+1 : len(rem)-1] // Truncate newline
 	// Isolate the arguments.
 	cmd.Args = string(rem)
 	return

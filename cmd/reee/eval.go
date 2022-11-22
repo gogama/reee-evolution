@@ -6,12 +6,13 @@ import (
 	"crypto/md5"
 	"errors"
 	"fmt"
-	"github.com/gogama/reee-evolution/log"
-	"github.com/gogama/reee-evolution/protocol"
 	"io"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gogama/reee-evolution/log"
+	"github.com/gogama/reee-evolution/protocol"
 )
 
 type evalCommand struct {
@@ -43,13 +44,13 @@ func (cmd *evalCommand) Exec(cmdID string, logger log.Printer, ins io.Reader, _ 
 
 	var sb strings.Builder
 	sb.Grow(len(cmd.Group) + 1 + len(cmd.Rule) + 1 + len(N))
+	_, _ = sb.WriteString(N)
+	_ = sb.WriteByte(' ')
 	_, _ = sb.WriteString(cmd.Group)
 	if len(cmd.Rule) > 0 {
 		_ = sb.WriteByte(' ')
 		_, _ = sb.WriteString(cmd.Rule)
 	}
-	_ = sb.WriteByte(' ')
-	_, _ = sb.WriteString(N)
 	pc := protocol.Command{
 		Type:  protocol.EvalCommandType,
 		ID:    cmdID,

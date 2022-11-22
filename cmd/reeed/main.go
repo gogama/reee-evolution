@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/gogama/reee-evolution/cmd/reeeuse"
-	"github.com/gogama/reee-evolution/daemon"
-	"github.com/jhillyerd/enmime"
 	"io"
 	"net"
 	"os"
@@ -14,10 +11,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gogama/reee-evolution/cmd/reeed/cache"
+
 	"github.com/alexflint/go-arg"
+	"github.com/gogama/reee-evolution/cmd/reeeuse"
+	"github.com/gogama/reee-evolution/daemon"
 	"github.com/gogama/reee-evolution/log"
 	"github.com/gogama/reee-evolution/protocol"
 	"github.com/gogama/reee-evolution/version"
+	"github.com/jhillyerd/enmime"
 )
 
 type args struct {
@@ -82,7 +84,10 @@ func runDaemon(parent context.Context, r io.Reader, w io.Writer, a *args) error 
 	// TODO. SQLite3 history.
 
 	// Create the cache.
-	// TODO. Cache.
+	c := &cache.TempCache{}
+
+	// TODO: Delete old version of the Unix domain docket if it exists.
+	// TODO: Apply some reasonable timeouts on the sockets.
 
 	// Create the listener.
 	listener, err := net.Listen(a.Network, a.Address)
@@ -101,6 +106,7 @@ func runDaemon(parent context.Context, r io.Reader, w io.Writer, a *args) error 
 		Listener: listener,
 		Logger:   logger,
 		Groups:   groups,
+		Cache:    c,
 	}
 	var fatalErr atomic.Value
 	go func() {
@@ -129,6 +135,9 @@ func runDaemon(parent context.Context, r io.Reader, w io.Writer, a *args) error 
 	if err == nil {
 		log.Verbose(logger, "stopped.")
 	}
+
+	// TODO: Clean up the Unix domain socket file if it exists.
+
 	return err
 }
 

@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/md5"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -211,14 +213,26 @@ func handleList(ctx *cmdContext) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func handleEval(ctx *cmdContext) error {
-	// TODO: Output should be lines like "log [text]" or "error [text]" or "success [code]"
+const evalErrPrefix = "args format must be <len> <group> [<rule>] but "
 
-	g, r, found := strings.Cut(ctx.args, " ")
-	if !found {
-		g = ctx.args
+func handleEval(ctx *cmdContext) error {
+	if ctx.args == "" {
+		return errors.New(evalErrPrefix + "args is empty")
 	}
-	ctx.Verbose("group: %s", g)
+
+	N, rem, found := strings.Cut(ctx.args, " ")
+	n, err := strconv.Atoi(N)
+	if err != nil || n < 0 {
+		return fmt.Errorf(evalErrPrefix+"first element is %q", N)
+	}
+
+	if !found {
+		return errors.New(evalErrPrefix + "args does not contain <group>")
+	}
+	g, r, found := strings.Cut(rem, " ")
+	if !found {
+		g = rem
+	}
 
 	var rules []Rule
 	var ok bool
@@ -228,7 +242,6 @@ func handleEval(ctx *cmdContext) error {
 	}
 
 	if r != "" {
-		ctx.Verbose("rule: %s", r)
 		for i := range rules {
 			if r == rules[i].String() {
 				rules[0] = rules[i]
@@ -241,17 +254,40 @@ func handleEval(ctx *cmdContext) error {
 		}
 	}
 
-	var buf bytes.Buffer
-	if !ctx.isEOF {
-		_, err := io.Copy(&buf, ctx.r)
-		if err != nil {
-			// TODO
+	ctx.Verbose("reading %d bytes of input for group: %s, rules: %s...", n, g, rules)
+
+	buf := make([]byte, n)
+	var m int
+	start := time.Now()
+	for !ctx.isEOF && m < n {
+		var o int
+		o, err = ctx.r.Read(buf[m:])
+		m += o
+		if err == io.EOF {
+			ctx.isEOF = true
+		} else if err != nil {
+			return err
 		}
 	}
+	hash := fmt.Sprintf("%x", md5.Sum(buf))
+	elapsed := time.Since(start)
+	ctx.Verbose("read %d bytes of input with md5sum %s in %s.", m, hash, elapsed)
 
-	msg, err := parseMsg(ctx, &buf)
-	if err != nil {
-		// TODO:
+	if m < n {
+		return fmt.Errorf("insufficient input: received only %d/%d expected bytes", m, n)
+	}
+
+	msg := getMsg(ctx, hash)
+	if msg != nil {
+		ctx.Verbose("retrieved message from cache with key %s.", hash)
+	} else {
+		start = time.Now()
+		msg, err = parseMsg(ctx, buf)
+		if err != nil {
+			return fmt.Errorf("invalid message: %s", err.Error())
+		}
+		elapsed = time.Since(start)
+		ctx.Verbose("parsed message in %s.", elapsed)
 	}
 
 	var stop bool
@@ -271,21 +307,22 @@ func getMsg(ctx *cmdContext, key string) *enmime.Envelope {
 	return ctx.d.Cache.Get(key)
 }
 
-func parseMsg(ctx *cmdContext, buf *bytes.Buffer) (*enmime.Envelope, error) {
-	//key := fmt.Sprintf("%x", md5.Sum(buf.Bytes()))
+func parseMsg(ctx *cmdContext, b []byte) (*enmime.Envelope, error) {
+	//key := fmt.Sprintf("%x", md5.Sum(b.Bytes()))
 	// FIXME: Ensure cache works. Line below commented out because currently cache is always nil.
 	// msg := getMsg(ctx, key)
 	var msg *enmime.Envelope
 	if msg == nil {
 		var err error
-		msg, err = enmime.NewParser().ReadEnvelope(buf)
+		r := bytes.NewReader(b)
+		msg, err = enmime.NewParser().ReadEnvelope(r)
 		if err != nil {
 			return nil, err
 		}
 		ctx.d.lock.Lock()
 		defer ctx.d.lock.Unlock()
 		// FIXME: Ensure cache works.
-		//ctx.d.Cache.Put(key, msg, int64(buf.Len()))
+		//ctx.d.Cache.Put(key, msg, int64(b.Len()))
 	}
 	return msg, nil
 }
