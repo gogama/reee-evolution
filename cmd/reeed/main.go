@@ -87,7 +87,11 @@ func runDaemon(parent context.Context, r io.Reader, w io.Writer, a *args) error 
 	s := &store.TempStore{}
 
 	// Create the cache.
-	c := &cache.TempCache{}
+	c := cache.New(cache.Policy{
+		MaxCount: 100,
+		MaxSize:  25 * 1024 * 1024,
+		MaxAge:   20 * time.Minute,
+	})
 
 	// TODO: Delete old version of the Unix domain docket if it exists.
 	// TODO: Apply some reasonable timeouts on the sockets.

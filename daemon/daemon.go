@@ -271,7 +271,7 @@ func handleEval(ctx *cmdContext) error {
 		ctx.Verbose("parsed MIME envelope for %s in %s.", storeID, elapsed)
 
 		// Try to retrieve metadata from the store.
-		msg, err = prepareMsg(ctx, md5Sum, storeID, e)
+		msg, err = prepareMsg(ctx, md5Sum, storeID, e, uint64(n))
 		if err != nil {
 			return err
 		}
@@ -302,7 +302,7 @@ func getCachedMsgLocked(ctx *cmdContext, cacheKey string) *Message {
 	return msg
 }
 
-func prepareMsg(ctx *cmdContext, cacheKey, storeID string, e *enmime.Envelope) (*Message, error) {
+func prepareMsg(ctx *cmdContext, cacheKey, storeID string, e *enmime.Envelope, size uint64) (*Message, error) {
 	ctx.d.lock.Lock()
 	defer ctx.d.lock.Unlock()
 
@@ -350,6 +350,9 @@ func prepareMsg(ctx *cmdContext, cacheKey, storeID string, e *enmime.Envelope) (
 	}
 	elapsed = time.Since(start)
 	ctx.Verbose("put %s into store in %s.", storeID, elapsed)
+
+	// Put the message into cache.
+	ctx.d.Cache.Put(cacheKey, msg, size)
 
 	// Message is ready.
 	return msg, nil

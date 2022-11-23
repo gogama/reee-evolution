@@ -18,7 +18,7 @@ type Message struct {
 
 type MessageCache interface {
 	Get(cacheKey string) *Message
-	Put(cacheKey string, msg *Message, size int64)
+	Put(cacheKey string, msg *Message, size uint64)
 }
 
 type MessageStore interface {
