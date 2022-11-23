@@ -5,27 +5,30 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/gogama/reee-evolution/cmd/reeed/cache"
+	"github.com/gogama/reee-evolution/cmd/reeed/store"
 
 	"github.com/alexflint/go-arg"
+	"github.com/gogama/reee-evolution/cmd/reeed/cache"
 	"github.com/gogama/reee-evolution/cmd/reeeuse"
 	"github.com/gogama/reee-evolution/daemon"
 	"github.com/gogama/reee-evolution/log"
 	"github.com/gogama/reee-evolution/protocol"
 	"github.com/gogama/reee-evolution/version"
-	"github.com/jhillyerd/enmime"
 )
 
 type args struct {
-	Address string `arg:"--addr,env:REEE_ADDR" help:"daemon address"`
-	Network string `arg:"--net,env:REEE_NET" help:"daemon network"`
-	Verbose bool   `arg:"-v,--verbose" help:"enable verbose logging"`
+	Address   string  `arg:"--addr,env:REEE_ADDR" help:"daemon address"`
+	Network   string  `arg:"--net,env:REEE_NET" help:"daemon network"`
+	SamplePct percent `arg:"-s,--sample" help:"sample percentage, e.g. 25%" default:"1%"`
+	Verbose   bool    `arg:"-v,--verbose" help:"enable verbose logging"`
 }
 
 func (a *args) Version() string {
@@ -80,8 +83,8 @@ func runDaemon(parent context.Context, r io.Reader, w io.Writer, a *args) error 
 	// Load the rules.
 	groups, err := loadRuleGroups(signalCtx, logger, a)
 
-	// Create the history.
-	// TODO. SQLite3 history.
+	// Create or open the SQLite3- based persistent store.
+	s := &store.TempStore{}
 
 	// Create the cache.
 	c := &cache.TempCache{}
@@ -103,10 +106,13 @@ func runDaemon(parent context.Context, r io.Reader, w io.Writer, a *args) error 
 
 	// Start the daemon.
 	d := daemon.Daemon{
-		Listener: listener,
-		Logger:   logger,
-		Groups:   groups,
-		Cache:    c,
+		Listener:  listener,
+		Logger:    logger,
+		Groups:    groups,
+		Cache:     c,
+		Store:     s,
+		SampleSrc: rand.NewSource(time.Now().UnixMilli()),
+		SamplePct: float64(a.SamplePct),
 	}
 	var fatalErr atomic.Value
 	go func() {
@@ -148,21 +154,21 @@ func loadRuleGroups(ctx context.Context, logger log.Printer, a *args) (map[strin
 		"foo": {
 			&tempDummyRule{
 				name: "bar",
-				f: func(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error) {
+				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message) (stop bool, err error) {
 					log.Verbose(logger, "bar rule returns (false, nil)")
 					return false, nil
 				},
 			},
 			&tempDummyRule{
 				name: "baz",
-				f: func(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error) {
+				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message) (stop bool, err error) {
 					log.Verbose(logger, "baz rule returns (true, nil)")
 					return true, nil
 				},
 			},
 			&tempDummyRule{
 				name: "qux",
-				f: func(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error) {
+				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message) (stop bool, err error) {
 					panic("qux rule does not get called...")
 				},
 			},
@@ -170,7 +176,7 @@ func loadRuleGroups(ctx context.Context, logger log.Printer, a *args) (map[strin
 		"hello": {
 			&tempDummyRule{
 				name: "world",
-				f: func(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error) {
+				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message) (stop bool, err error) {
 					return false, errors.New("world rule fails with error")
 				},
 			},
@@ -178,8 +184,53 @@ func loadRuleGroups(ctx context.Context, logger log.Printer, a *args) (map[strin
 	}, nil
 }
 
+type percent float64
+
+func percentError(b []byte) error {
+	return fmt.Errorf("invalid percentage: %q. must be a number in [0..100] plus optional %% symbol", b)
+}
+
+func (pct *percent) UnmarshalText(b []byte) error {
+	if len(b) == 0 {
+		return percentError(b)
+	}
+
+	// Validate.
+	var i int
+	var dot bool
+	for ; i < len(b); i++ {
+		if b[i] == '.' {
+			i++
+			break
+		} else if b[i] == '%' && i == len(b)-1 {
+			b = b[:len(b)-1]
+			break
+		} else if !('0' <= b[i] && b[i] <= '9') {
+			return percentError(b)
+		}
+	}
+	for ; dot && i < len(b); i++ {
+		if b[i] == '%' && i == len(b)-1 {
+			b = b[:len(b)-1]
+			break
+		} else if !('0' <= b[i] && b[i] <= '9') {
+			return percentError(b)
+		}
+	}
+
+	// Convert.
+	f, err := strconv.ParseFloat(string(b), 64)
+	if err != nil && !(0.0 <= f && f <= 100.0) {
+		return percentError(b)
+	}
+
+	// Finished.
+	*pct = percent(f / 100.0)
+	return nil
+}
+
 // todo: delete
-type tempDummyRuleFunc func(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error)
+type tempDummyRuleFunc func(ctx context.Context, logger log.Printer, msg *daemon.Message) (stop bool, err error)
 
 // todo: delete
 type tempDummyRule struct {
@@ -193,6 +244,6 @@ func (todoDelete *tempDummyRule) String() string {
 }
 
 // todo: delete
-func (todoDelete *tempDummyRule) Eval(ctx context.Context, logger log.Printer, msg *enmime.Envelope) (stop bool, err error) {
+func (todoDelete *tempDummyRule) Eval(ctx context.Context, logger log.Printer, msg *daemon.Message) (stop bool, err error) {
 	return todoDelete.f(ctx, logger, msg)
 }

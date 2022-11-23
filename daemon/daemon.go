@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -20,35 +21,14 @@ import (
 	"github.com/jhillyerd/enmime"
 )
 
-type GroupRecord struct {
-	Message   *enmime.Envelope
-	Hash      string
-	StartTime time.Time
-	Group     string
-	Rules     []RuleRecord
-}
-
-type RuleRecord struct {
-	StartTime time.Time
-	Rule      string
-	Result    int // TODO: Should be a meaningful value.
-}
-
-type History interface {
-	Record(gr GroupRecord) error
-}
-
-type EnvelopeCache interface {
-	Get(key string) *enmime.Envelope
-	Put(key string, env *enmime.Envelope, size int64)
-}
-
 type Daemon struct {
-	Listener net.Listener
-	Logger   log.Printer
-	Groups   map[string][]Rule
-	Hist     History
-	Cache    EnvelopeCache
+	Listener  net.Listener
+	Logger    log.Printer
+	Groups    map[string][]Rule
+	Cache     MessageCache
+	Store     MessageStore
+	SampleSrc rand.Source
+	SamplePct float64
 
 	lock      sync.RWMutex
 	ctx       context.Context
@@ -269,25 +249,32 @@ func handleEval(ctx *cmdContext) error {
 			return err
 		}
 	}
-	hash := fmt.Sprintf("%x", md5.Sum(buf))
+	md5Sum := fmt.Sprintf("%x", md5.Sum(buf))
 	elapsed := time.Since(start)
-	ctx.Verbose("read %d bytes of input with md5sum %s in %s.", m, hash, elapsed)
+	ctx.Verbose("read %d bytes of input with md5sum %s in %s.", m, md5Sum, elapsed)
 
 	if m < n {
 		return fmt.Errorf("insufficient input: received only %d/%d expected bytes", m, n)
 	}
 
-	msg := getMsg(ctx, hash)
-	if msg != nil {
-		ctx.Verbose("retrieved message from cache with key %s.", hash)
-	} else {
+	msg := getCachedMsg(ctx, md5Sum)
+	if msg == nil {
+		// Parse the MIME envelope.
 		start = time.Now()
-		msg, err = parseMsg(ctx, buf)
+		var e *enmime.Envelope
+		e, err = enmime.NewParser().ReadEnvelope(bytes.NewReader(buf))
 		if err != nil {
 			return fmt.Errorf("invalid message: %s", err.Error())
 		}
+		storeID := toStoreID(e, md5Sum)
 		elapsed = time.Since(start)
-		ctx.Verbose("parsed message in %s.", elapsed)
+		ctx.Verbose("parsed MIME envelope for %s in %s.", storeID, elapsed)
+
+		// Try to retrieve metadata from the store.
+		msg, err = prepareMsg(ctx, md5Sum, storeID, e)
+		if err != nil {
+			return err
+		}
 	}
 
 	var stop bool
@@ -301,32 +288,69 @@ func handleEval(ctx *cmdContext) error {
 	return nil
 }
 
-func getMsg(ctx *cmdContext, key string) *enmime.Envelope {
+func getCachedMsg(ctx *cmdContext, cacheKey string) *Message {
 	ctx.d.lock.RLock()
 	defer ctx.d.lock.RUnlock()
-	return ctx.d.Cache.Get(key)
+	return getCachedMsgLocked(ctx, cacheKey)
 }
 
-func parseMsg(ctx *cmdContext, b []byte) (*enmime.Envelope, error) {
-	//key := fmt.Sprintf("%x", md5.Sum(b.Bytes()))
-	// FIXME: Ensure cache works. Line below commented out because currently cache is always nil.
-	// msg := getMsg(ctx, key)
-	var msg *enmime.Envelope
-	if msg == nil {
-		var err error
-		r := bytes.NewReader(b)
-		msg, err = enmime.NewParser().ReadEnvelope(r)
-		if err != nil {
-			return nil, err
-		}
-		ctx.d.lock.Lock()
-		defer ctx.d.lock.Unlock()
-		// FIXME: Ensure cache works.
-		//ctx.d.Cache.Put(key, msg, int64(b.Len()))
+func getCachedMsgLocked(ctx *cmdContext, cacheKey string) *Message {
+	msg := ctx.d.Cache.Get(cacheKey)
+	if msg != nil {
+		ctx.Verbose("retrieved message from cache with cacheKey %s.", cacheKey)
 	}
-	return msg, nil
+	return msg
 }
 
-func parseEvalArgs(args []string) (g, r string, err error) {
-	return
+func prepareMsg(ctx *cmdContext, cacheKey, storeID string, e *enmime.Envelope) (*Message, error) {
+	ctx.d.lock.Lock()
+	defer ctx.d.lock.Unlock()
+
+	// Try to fetch from cache in case another request cached it since
+	// we checked.
+	msg := getCachedMsgLocked(ctx, cacheKey)
+	if msg != nil {
+		return msg, nil
+	}
+
+	// Try to get the metadata from the persistent message store.
+	start := time.Now()
+	meta, ok := ctx.d.Store.GetMetadata(storeID)
+	elapsed := time.Since(start)
+	if ok {
+		ctx.Verbose("found metadata for %s in message store in %s.", storeID, elapsed)
+		return &Message{e, meta}, nil
+	}
+	ctx.Verbose("did not find metadata for %s in message store in %s.", storeID, elapsed)
+
+	// At this point we know the message isn't in the store. Make a
+	// sampling decision.
+	max := int64(float64(1<<63) * ctx.d.SamplePct)
+	s := ctx.d.SampleSrc.Int63()
+	sampled := s <= max
+	if sampled {
+		ctx.Verbose("sampled %s.", storeID)
+	} else {
+		ctx.Verbose("did not sample %s at %f%%. (value %d > max %d)", storeID, ctx.d.SamplePct*100.0, s, max)
+	}
+
+	// Construct the message.
+	msg = &Message{
+		Envelope: e,
+		metadata: Metadata{
+			sampled: sampled,
+		},
+	}
+
+	// Write the message back to the store.
+	start = time.Now()
+	err := ctx.d.Store.PutMessage(storeID, msg)
+	if err != nil {
+		return nil, err
+	}
+	elapsed = time.Since(start)
+	ctx.Verbose("put %s into store in %s.", storeID, elapsed)
+
+	// Message is ready.
+	return msg, nil
 }
