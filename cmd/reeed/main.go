@@ -93,7 +93,9 @@ func runDaemon(parent context.Context, r io.Reader, w io.Writer, a *args) error 
 		MaxAge:   20 * time.Minute,
 	})
 
-	// TODO: Delete old version of the Unix domain docket if it exists.
+	// Clean up any old domain socket.
+	cleanupSocket(logger, a.Network, a.Address)
+
 	// TODO: Apply some reasonable timeouts on the sockets.
 
 	// Create the listener.
