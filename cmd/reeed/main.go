@@ -52,7 +52,7 @@ func main() {
 	arg.MustParse(&a)
 
 	// Run the daemon program.
-	err := runDaemon(context.Background(), os.Stdin, os.Stderr, &a)
+	err := runDaemon(context.Background(), os.Stderr, &a)
 	if err != nil {
 		msg := err.Error()
 		if strings.HasSuffix(msg, "\n") {
@@ -69,7 +69,7 @@ func main() {
 	}
 }
 
-func runDaemon(parent context.Context, r io.Reader, w io.Writer, a *args) error {
+func runDaemon(parent context.Context, w io.Writer, a *args) error {
 	// Initialize logging.
 	lvl := log.NormalLevel
 	if a.Verbose {
