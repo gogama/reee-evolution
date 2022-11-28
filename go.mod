@@ -7,6 +7,7 @@ require (
 	github.com/gofrs/uuid v4.3.1+incompatible
 	github.com/gogama/policy-lru v0.0.0-20221123213906-b3cf3295d8c5
 	github.com/jhillyerd/enmime v0.10.1
+	github.com/mattn/go-sqlite3 v1.14.16
 )
 
 require (

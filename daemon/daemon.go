@@ -315,7 +315,10 @@ func prepareMsg(ctx *cmdContext, cacheKey, storeID string, e *enmime.Envelope, s
 
 	// Try to get the metadata from the persistent message store.
 	start := time.Now()
-	meta, ok := ctx.d.Store.GetMetadata(storeID)
+	meta, ok, err := ctx.d.Store.GetMetadata(storeID)
+	if err != nil {
+		return nil, err
+	}
 	elapsed := time.Since(start)
 	if ok {
 		ctx.Verbose("found metadata for %s in message store in %s.", storeID, elapsed)
@@ -344,7 +347,7 @@ func prepareMsg(ctx *cmdContext, cacheKey, storeID string, e *enmime.Envelope, s
 
 	// Write the message back to the store.
 	start = time.Now()
-	err := ctx.d.Store.PutMessage(storeID, msg)
+	err = ctx.d.Store.PutMessage(storeID, msg)
 	if err != nil {
 		return nil, err
 	}

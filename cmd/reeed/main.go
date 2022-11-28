@@ -13,10 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gogama/reee-evolution/cmd/reeed/store"
-
 	"github.com/alexflint/go-arg"
 	"github.com/gogama/reee-evolution/cmd/reeed/cache"
+	"github.com/gogama/reee-evolution/cmd/reeed/store"
 	"github.com/gogama/reee-evolution/cmd/reeeuse"
 	"github.com/gogama/reee-evolution/daemon"
 	"github.com/gogama/reee-evolution/log"
@@ -25,8 +24,10 @@ import (
 )
 
 type args struct {
-	Address   string  `arg:"--addr,env:REEE_ADDR" help:"daemon address"`
-	Network   string  `arg:"--net,env:REEE_NET" help:"daemon network"`
+	Address   string  `arg:"-a,--addr,env:REEE_ADDR" help:"listen on address"`
+	Network   string  `arg:"-n,--net,env:REEE_NET" help:"listen on network"`
+	DBFile    string  `arg:"--db,env:REEE_DB" help:"path to email events database"`
+	NoDB      bool    `arg:"--no-db" help:"don't log events to database"`
 	SamplePct percent `arg:"-s,--sample" help:"sample percentage, e.g. 25%" default:"1%"`
 	Verbose   bool    `arg:"-v,--verbose" help:"enable verbose logging"`
 }
@@ -45,6 +46,9 @@ func main() {
 	a := args{
 		Network: network,
 		Address: address,
+	}
+	if dir, err := reeeuse.Dir(os.UserCacheDir, false); err == nil {
+		a.DBFile = reeeuse.File(dir, ".sqlite3")
 	}
 
 	// Parse arguments. Exit early on parsing error, validation error,
@@ -80,11 +84,27 @@ func runDaemon(parent context.Context, w io.Writer, a *args) error {
 	// Get a context that ends when we get a terminating signal.
 	signalCtx, stop := reeeuse.SignalContext(parent)
 
+	// Clean up any old domain socket.
+	cleanupSocket(logger, a.Network, a.Address)
+
 	// Load the rules.
 	groups, err := loadRuleGroups(signalCtx, logger, a)
 
-	// Create or open the SQLite3- based persistent store.
-	s := &store.TempStore{}
+	// Create or open the SQLite3-based persistent store.
+	var s daemon.MessageStore
+	if a.NoDB {
+		s = &store.NullStore{}
+	} else {
+		log.Verbose(logger, "opening message store [%s]...", a.DBFile)
+		if s, err = store.NewSQLite3(signalCtx, a.DBFile); err != nil {
+			return err
+		}
+		if closer, ok := s.(io.Closer); ok {
+			defer func() {
+				_ = closer.Close()
+			}()
+		}
+	}
 
 	// Create the cache.
 	c := cache.New(cache.Policy{
@@ -92,9 +112,6 @@ func runDaemon(parent context.Context, w io.Writer, a *args) error {
 		MaxSize:  25 * 1024 * 1024,
 		MaxAge:   20 * time.Minute,
 	})
-
-	// Clean up any old domain socket.
-	cleanupSocket(logger, a.Network, a.Address)
 
 	// TODO: Apply some reasonable timeouts on the sockets.
 

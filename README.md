@@ -1,6 +1,7 @@
 # reee-evolution
 Email filter for Evolution
 
+SQLite3: https://github.com/mattn/go-sqlite3
 
 Rough design:
     There are two programs, a daemon (reeed) and a CLI (reee)
