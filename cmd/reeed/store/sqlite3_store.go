@@ -3,9 +3,14 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
+	"net/mail"
 	"os"
 	"path/filepath"
+	"time"
+
+	"github.com/jhillyerd/enmime"
 
 	"github.com/gogama/reee-evolution/daemon"
 	_ "github.com/mattn/go-sqlite3"
@@ -134,7 +139,64 @@ func (s *SQLite3Store) GetMetadata(storeID string) (daemon.Metadata, bool, error
 }
 
 func (s *SQLite3Store) PutMessage(storeID string, msg *daemon.Message) error {
-	return nil
+	insertTime := time.Now().Format(formatISO8601)
+	isSampled := msg.IsSampled()
+
+	var sendTime *string
+	var fromAddress *string
+	var fromAlias *string
+	var toAddress *string
+	var toAlias *string
+	var toList *string
+	var subject *string
+	var ccAddress *string
+	var ccAlias *string
+	var ccList *string
+	var senderAddress *string
+	var senderAlias *string
+	var inReplyToID *string
+	var threadTopic *string
+	var evolutionSource *string
+	var mainHeaderJSON *[]byte
+	var fullText *[]byte
+
+	if date := msg.Envelope.GetHeader("Date"); date != "" {
+		t, err := mail.ParseDate(date)
+		if err != nil {
+			return err
+		}
+		f := t.Format(formatISO8601)
+		sendTime = &f
+	}
+
+	fromAddress, fromAlias, _ = parseAddressList(msg.Envelope, "From")
+	toAddress, toAlias, toList = parseAddressList(msg.Envelope, "To")
+
+	if value := msg.Envelope.GetHeader("Subject"); value != "" {
+		subject = &value
+	}
+
+	ccAddress, ccAlias, ccList = parseAddressList(msg.Envelope, "CC")
+	senderAddress, senderAlias, _ = parseAddressList(msg.Envelope, "Sender")
+	inReplyToID, _, _ = parseAddressList(msg.Envelope, "In-Reply-To")
+	threadTopic = optionalHeader(msg.Envelope, "Thread-Topic")
+	evolutionSource = optionalHeader(msg.Envelope, "X-Evolution-Source")
+
+	if isSampled {
+		b, err := headersAsJSON(msg.Envelope)
+		if err != nil {
+			return err
+		}
+		mainHeaderJSON = &b
+		fullText = &msg.FullText
+	}
+
+	_, err := s.stmt[putMessage].Exec(storeID, insertTime, isSampled, sendTime,
+		fromAddress, fromAlias, toAddress, toAlias, toList,
+		subject, ccAddress, ccAlias, ccList, senderAddress, senderAlias,
+		inReplyToID, threadTopic, evolutionSource, mainHeaderJSON, fullText)
+
+	return err
 }
 
 func (s *SQLite3Store) RecordEval(storeID string, r daemon.EvalRecord) error {
@@ -210,11 +272,54 @@ const (
 	putMessage
 	numStmt // TODO: Move this down to the end.
 	recordEval
+
+	formatISO8601 = "2006-01-02T15:04:05.999Z07:00"
 )
 
 var (
 	stmtText = [numStmt]string{
 		`SELECT is_sampled FROM message WHERE id = :id`,
 		`SELECT "key", "value" FROM message_tag WHERE id = :id`,
+		`INSERT INTO message(
+                    id, insert_time, is_sampled, send_time,
+                    from_address, from_alias, to_address, to_alias, to_list,
+                    subject, cc_address, cc_alias, cc_list, sender_address, sender_alias,
+                    in_reply_to_id, thread_topic, evolution_source, main_header_json, full_text)
+			VALUES (
+			        :id, :insert_time, :is_sampled, :send_time,
+			        :from_address, :from_alias, :to_address, :to_alias, :to_list,
+			        :subject, :cc_address, :cc_alias, :cc_list, :sender_address, :sender_alias,
+			        :in_reply_to_id, :thread_topic, :evolution_source, :main_header_json, :full_text)`,
 	}
 )
+
+func parseAddressList(e *enmime.Envelope, hdr string) (address, alias, list *string) {
+	value := e.GetHeader(hdr)
+	addrs, err := mail.ParseAddressList(value)
+	if err != nil {
+		return
+	}
+	if len(addrs) == 1 {
+		address = &addrs[0].Address
+		alias = &addrs[0].Name
+	} else {
+		list = &value
+	}
+	return
+}
+
+func optionalHeader(e *enmime.Envelope, hdr string) *string {
+	if value := e.GetHeader(hdr); value != "" {
+		return &value
+	}
+	return nil
+}
+
+func headersAsJSON(e *enmime.Envelope) ([]byte, error) {
+	keys := e.GetHeaderKeys()
+	hdrs := make(map[string]string, len(keys))
+	for _, key := range keys {
+		hdrs[key] = e.GetHeader(key)
+	}
+	return json.Marshal(&hdrs)
+}

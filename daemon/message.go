@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"net/mail"
 	"time"
 
 	"github.com/jhillyerd/enmime"
@@ -23,9 +24,18 @@ func NewMetadata(sampled bool, tags map[string]string) Metadata {
 	}
 }
 
+func (m *Metadata) IsSampled() bool {
+	return m.sampled
+}
+
 type Message struct {
 	Envelope *enmime.Envelope
+	FullText []byte
 	metadata Metadata
+}
+
+func (m *Message) IsSampled() bool {
+	return m.metadata.IsSampled()
 }
 
 type MessageCache interface {
@@ -51,14 +61,16 @@ type RuleEvalRecord struct {
 	StartTime time.Time
 	Rule      string
 	Result    int // TODO: Should be a meaningful value.
+	// TODO: Add tags here.
 }
 
 func toStoreID(e *enmime.Envelope, md5Sum string) string {
 	id := e.GetHeader("Message-ID")
 	if id != "" {
-		// TODO: Parse away any angle brackets.
-		return "Message-ID:" + id
-	} else {
-		return "MD5-Sum:" + md5Sum
+		addr, err := mail.ParseAddress(id)
+		if err == nil {
+			return "Message-ID:" + addr.Address
+		}
 	}
+	return "MD5-Sum:" + md5Sum
 }
