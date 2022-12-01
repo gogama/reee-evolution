@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"net/mail"
+	"sync"
 	"time"
 
 	"github.com/jhillyerd/enmime"
@@ -24,18 +25,19 @@ func NewMetadata(sampled bool, tags map[string]string) Metadata {
 	}
 }
 
-func (m *Metadata) IsSampled() bool {
-	return m.sampled
-}
-
 type Message struct {
 	Envelope *enmime.Envelope
-	FullText []byte
+	fullText []byte
 	metadata Metadata
+	lock     sync.RWMutex
+}
+
+func (m *Message) FullText() []byte {
+	return m.fullText
 }
 
 func (m *Message) IsSampled() bool {
-	return m.metadata.IsSampled()
+	return m.metadata.sampled
 }
 
 type MessageCache interface {
@@ -46,22 +48,106 @@ type MessageCache interface {
 type MessageStore interface {
 	GetMetadata(storeID string) (Metadata, bool, error)
 	PutMessage(storeID string, msg *Message) error
-	RecordEval(storeID string, r EvalRecord) error
+	RecordEval(storeID string, r *EvalRecord) error
 }
 
 type EvalRecord struct {
 	Message   *Message
-	Hash      string
-	StartTime time.Time
-	Group     string
-	Rules     []RuleEvalRecord
+	group     string
+	startTime time.Time
+	endTime   time.Time
+	rules     []*RuleEvalRecord
+}
+
+func (rec *EvalRecord) Group() string {
+	return rec.group
+}
+
+func (rec *EvalRecord) StartTime() time.Time {
+	return rec.startTime
+}
+
+func (rec *EvalRecord) EndTime() time.Time {
+	return rec.endTime
+}
+
+func (rec *EvalRecord) RuleLen() int {
+	return len(rec.rules)
+}
+
+func (rec *EvalRecord) Rule(i int) *RuleEvalRecord {
+	return rec.rules[i]
 }
 
 type RuleEvalRecord struct {
-	StartTime time.Time
-	Rule      string
-	Result    int // TODO: Should be a meaningful value.
-	// TODO: Add tags here.
+	evalRecord *EvalRecord
+	rule       string
+	startTime  time.Time
+	endTime    time.Time
+	stop       bool
+	err        error
+	tagChanges []TagChange
+}
+
+func (rec *RuleEvalRecord) Rule() string {
+	return rec.rule
+}
+
+func (rec *RuleEvalRecord) StartTime() time.Time {
+	return rec.startTime
+}
+
+func (rec *RuleEvalRecord) EndTime() time.Time {
+	return rec.endTime
+}
+
+func (rec *RuleEvalRecord) Stop() bool {
+	return rec.stop
+}
+
+func (rec *RuleEvalRecord) Err() error {
+	return rec.err
+}
+
+func (rec *RuleEvalRecord) GetTag(key string) (value string, hit bool) {
+	msg := rec.evalRecord.Message
+	lock := msg.lock
+	lock.RLock()
+	defer lock.RUnlock()
+	value, hit = msg.metadata.tags[key]
+	return
+}
+
+func (rec *RuleEvalRecord) SetTag(key, value string) {
+	msg := rec.evalRecord.Message
+	lock := msg.lock
+	lock.Lock()
+	defer lock.Unlock()
+	msg.metadata.tags[key] = value
+	rec.tagChanges = append(rec.tagChanges, TagChange{time.Now(), key, &value})
+}
+
+func (rec *RuleEvalRecord) DeleteTag(key string) {
+	msg := rec.evalRecord.Message
+	lock := msg.lock
+	lock.Lock()
+	defer lock.Unlock()
+	delete(msg.metadata.tags, key)
+	rec.tagChanges = append(rec.tagChanges, TagChange{time.Now(), key, nil})
+}
+
+func (rec *RuleEvalRecord) TagChangeLen() int {
+	return len(rec.tagChanges)
+}
+
+func (rec *RuleEvalRecord) TagChange(i int) TagChange {
+	return rec.tagChanges[i]
+}
+
+type TagChange struct {
+	Time  time.Time
+	Key   string
+	Value *string
 }
 
 func toStoreID(e *enmime.Envelope, md5Sum string) string {

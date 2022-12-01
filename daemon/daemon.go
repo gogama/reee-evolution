@@ -258,6 +258,7 @@ func handleEval(ctx *cmdContext) error {
 	}
 
 	msg := getCachedMsg(ctx, md5Sum)
+	var storeID string
 	if msg == nil {
 		// Parse the MIME envelope.
 		start = time.Now()
@@ -266,7 +267,7 @@ func handleEval(ctx *cmdContext) error {
 		if err != nil {
 			return fmt.Errorf("invalid message: %s", err.Error())
 		}
-		storeID := toStoreID(e, md5Sum)
+		storeID = toStoreID(e, md5Sum)
 		elapsed = time.Since(start)
 		ctx.Verbose("parsed MIME envelope for %s in %s.", storeID, elapsed)
 
@@ -277,14 +278,45 @@ func handleEval(ctx *cmdContext) error {
 		}
 	}
 
-	var stop bool
-	for i := 0; i < len(rules) && !stop; i++ {
-		stop, err = rules[i].Eval(ctx, ctx, msg)
-		if err != nil {
-			// TODO: handle rule evaluation error
-		}
+	ger := &EvalRecord{
+		Message:   msg,
+		startTime: time.Now(),
+		group:     g,
+		rules:     make([]*RuleEvalRecord, 0, len(rules)),
 	}
 
+	var stop bool
+	var ruleEvalErr error
+	start = time.Now()
+	for i := 0; i < len(rules) && !stop; i++ {
+		rer := &RuleEvalRecord{
+			evalRecord: ger,
+			startTime:  time.Now(),
+			rule:       rules[i].String(),
+		}
+		stop, ruleEvalErr = rules[i].Eval(ctx, ctx, msg, rer)
+		rer.endTime = time.Now()
+		rer.stop = stop
+		rer.err = ruleEvalErr
+		ger.rules = append(ger.rules, rer)
+		if ruleEvalErr != nil {
+			ctx.Verbose("rule %s ended early with error: %s", rules[i], ruleEvalErr)
+			break
+		}
+	}
+	ger.endTime = time.Now()
+	elapsed = time.Since(start)
+	ctx.Verbose("evaluated %d rules in %s.", len(ger.rules), elapsed)
+
+	start = time.Now()
+	err = ctx.d.Store.RecordEval(storeID, ger)
+	if ruleEvalErr != nil {
+		return ruleEvalErr
+	} else if err != nil {
+		return err
+	}
+	elapsed = time.Since(start)
+	ctx.Verbose("recorded evaluation record in %s.", elapsed)
 	return nil
 }
 
@@ -322,7 +354,7 @@ func prepareMsg(ctx *cmdContext, cacheKey, storeID string, e *enmime.Envelope, b
 	elapsed := time.Since(start)
 	if ok {
 		ctx.Verbose("found metadata for %s in message store in %s.", storeID, elapsed)
-		return &Message{e, buf, meta}, nil
+		return &Message{Envelope: e, fullText: buf, metadata: meta}, nil
 	}
 	ctx.Verbose("did not find metadata for %s in message store in %s.", storeID, elapsed)
 
@@ -340,7 +372,7 @@ func prepareMsg(ctx *cmdContext, cacheKey, storeID string, e *enmime.Envelope, b
 	// Construct the message.
 	msg = &Message{
 		Envelope: e,
-		FullText: buf,
+		fullText: buf,
 		metadata: Metadata{
 			sampled: sampled,
 		},

@@ -135,7 +135,7 @@ func (s *SQLite3Store) GetMetadata(storeID string) (daemon.Metadata, bool, error
 		}
 	}
 
-	return daemon.NewMetadata(sampled, tags), false, nil
+	return daemon.NewMetadata(sampled, tags), true, nil
 }
 
 func (s *SQLite3Store) PutMessage(storeID string, msg *daemon.Message) error {
@@ -188,7 +188,8 @@ func (s *SQLite3Store) PutMessage(storeID string, msg *daemon.Message) error {
 			return err
 		}
 		mainHeaderJSON = &b
-		fullText = &msg.FullText
+		b2 := msg.FullText()
+		fullText = &b2
 	}
 
 	_, err := s.stmt[putMessage].Exec(storeID, insertTime, isSampled, sendTime,
@@ -199,7 +200,84 @@ func (s *SQLite3Store) PutMessage(storeID string, msg *daemon.Message) error {
 	return err
 }
 
-func (s *SQLite3Store) RecordEval(storeID string, r daemon.EvalRecord) error {
+func (s *SQLite3Store) RecordEval(storeID string, r *daemon.EvalRecord) error {
+	// Set up a transaction.
+	var tx *sql.Tx
+	var err error
+	tx, err = s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// Get the final result of the group evaluation if there was one.
+	var stop *bool
+	var errStr *string
+	m := r.RuleLen()
+	if m > 0 {
+		rr := r.Rule(m - 1)
+		boolValue := rr.Stop()
+		stop = &boolValue
+		if lastRuleErr := rr.Err(); lastRuleErr != nil {
+			stop = nil
+			strValue := lastRuleErr.Error()
+			errStr = &strValue
+		}
+	}
+
+	// Insert the root group evaluation record and get back its ID.
+	var result sql.Result
+	result, err = s.stmt[putGroupEvalRecord].Exec(storeID, r.Group(),
+		r.StartTime().Format(formatISO8601), r.EndTime().Format(formatISO8601), r.EndTime().Sub(r.StartTime()).Seconds(),
+		stop, errStr)
+	if err != nil {
+		return err
+	}
+	groupEvalID, err := result.LastInsertId()
+	if err != nil {
+		return err
+	}
+
+	// Insert each rule evaluation record, alongside the tag changes for
+	// that rule.
+	for i := 0; i < m; i++ {
+		rr := r.Rule(i)
+		if ruleErr := rr.Err(); err == nil {
+			boolValue := rr.Stop()
+			stop = &boolValue
+			errStr = nil
+		} else {
+			stop = nil
+			strValue := ruleErr.Error()
+			errStr = &strValue
+		}
+		_, err = s.stmt[putRuleEvalRecord].Exec(groupEvalID, rr.Rule(),
+			rr.StartTime().Format(formatISO8601), rr.EndTime().Format(formatISO8601), rr.EndTime().Sub(rr.StartTime()).Seconds(),
+			stop, errStr)
+		if err != nil {
+			return err
+		}
+
+		n := rr.TagChangeLen()
+		for j := 0; j < n; j++ {
+			tc := rr.TagChange(j)
+			_, err = s.stmt[putTagChange].Exec(storeID, tc.Key, tc.Value, tc.Time.Format(formatISO8601), r.Group(), rr.Rule())
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// Commit the transaction and return.
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+	tx = nil
 	return nil
 }
 
@@ -228,7 +306,7 @@ CREATE TABLE IF NOT EXISTS message(
     full_text          	TEXT
 );
 
-CREATE TABLE IF NOT EXISTS message_tag(
+CREATE TABLE IF NOT EXISTS tag(
     id 				INTEGER	PRIMARY KEY,
 	message_id		TEXT 	NOT NULL,
 	"key"       	TEXT 	NOT NULL,
@@ -243,25 +321,40 @@ CREATE TABLE IF NOT EXISTS message_tag(
 	FOREIGN KEY(message_id) REFERENCES message(id) 
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS iu_message_tag_on_message_id_key
-                 ON message_tag(message_id, "key");
+CREATE UNIQUE INDEX IF NOT EXISTS iu_tag_on_message_id_key
+                 ON tag(message_id, "key");
 
-CREATE TABLE IF NOT EXISTS message_eval(
-    id 			    INTEGER	PRIMARY KEY,
-    message_id      TEXT    NOT NULL,
-	"group"    		TEXT    NOT NULL,
-	rule        	TEXT    NOT NULL,
-	eval_result 	TEXT    NOT NULL,                                       
-	eval_start_time TEXT    NOT NULL,
-	eval_end_time   TEXT	NOT NULL,
-	eval_seconds    REAL    NOT NULL,
+CREATE TABLE IF NOT EXISTS group_eval(
+    id           INTEGER PRIMARY KEY,
+	message_id   TEXT    NOT NULL,
+	"group"      TEXT    NOT NULL,
+	start_time   TEXT    NOT NULL,
+	end_time     TEXT    NOT NULL,
+	seconds      REAL    NOT NULL,
+	stop         INTEGER,
+	err          TEXT,
 
 	FOREIGN KEY(message_id) REFERENCES message(id)
 );
 
-CREATE INDEX IF NOT EXISTS i_message_eval_on_message_id_id
-          ON message_eval(message_id, id);
+CREATE INDEX IF NOT EXISTS i_group_eval_on_message_id_id
+          ON group_eval(message_id, id);
 
+CREATE TABLE IF NOT EXISTS rule_eval(
+    id            	INTEGER PRIMARY KEY,
+    group_eval_id	INTEGER NOT NULL,
+	rule         	TEXT    NOT NULL,
+	start_time   	TEXT    NOT NULL,
+	end_time     	TEXT    NOT NULL,
+	seconds      	REAL    NOT NULL,
+	stop         	INTEGER,
+	err          	TEXT,
+
+	FOREIGN KEY(group_eval_id) REFERENCES group_eval(id)
+);
+
+CREATE INDEX IF NOT EXISTS i_rule_eval_on_group_eval_id_id
+          ON rule_eval(group_eval_id, id);
 `)
 	return err
 }
@@ -270,8 +363,10 @@ const (
 	getMetadataSampled stmt = iota
 	getMetadataTags
 	putMessage
-	numStmt // TODO: Move this down to the end.
-	recordEval
+	putGroupEvalRecord
+	putRuleEvalRecord
+	putTagChange
+	numStmt
 
 	formatISO8601 = "2006-01-02T15:04:05.999Z07:00"
 )
@@ -279,7 +374,7 @@ const (
 var (
 	stmtText = [numStmt]string{
 		`SELECT is_sampled FROM message WHERE id = :id`,
-		`SELECT "key", "value" FROM message_tag WHERE id = :id`,
+		`SELECT "key", "value" FROM tag WHERE id = :id AND "value" IS NOT NULL`,
 		`INSERT INTO message(
                     id, insert_time, is_sampled, send_time,
                     from_address, from_alias, to_address, to_alias, to_list,
@@ -290,6 +385,14 @@ var (
 			        :from_address, :from_alias, :to_address, :to_alias, :to_list,
 			        :subject, :cc_address, :cc_alias, :cc_list, :sender_address, :sender_alias,
 			        :in_reply_to_id, :thread_topic, :evolution_source, :main_header_json, :full_text)`,
+		`INSERT INTO group_eval(message_id, "group", start_time, end_time, seconds, stop, err)
+			  VALUES (:message_id, :group, :start_time, :end_time, :seconds, :stop, :err)`,
+		`INSERT INTO rule_eval(group_eval_id, rule, start_time, end_time, seconds, stop, err)
+    		  VALUES (:group_eval_id, :rule, :start_time, :end_time, :seconds, :stop, :err)`,
+		`INSERT INTO tag(message_id, "key", "value", create_time, create_group, create_rule)
+    		  VALUES (:message_id, :key, :value, :time, :group, :rule)
+    		      ON CONFLICT(message_id, "key") DO
+    	  UPDATE SET "value" = :value, update_time = :time, update_group = :group, update_rule = :rule`,
 	}
 )
 

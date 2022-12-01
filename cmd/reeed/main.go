@@ -177,21 +177,21 @@ func loadRuleGroups(ctx context.Context, logger log.Printer, a *args) (map[strin
 		"foo": {
 			&tempDummyRule{
 				name: "bar",
-				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message) (stop bool, err error) {
+				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message, _ daemon.Tagger) (stop bool, err error) {
 					log.Verbose(logger, "bar rule returns (false, nil)")
 					return false, nil
 				},
 			},
 			&tempDummyRule{
 				name: "baz",
-				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message) (stop bool, err error) {
+				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message, _ daemon.Tagger) (stop bool, err error) {
 					log.Verbose(logger, "baz rule returns (true, nil)")
 					return true, nil
 				},
 			},
 			&tempDummyRule{
 				name: "qux",
-				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message) (stop bool, err error) {
+				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message, _ daemon.Tagger) (stop bool, err error) {
 					panic("qux rule does not get called...")
 				},
 			},
@@ -199,7 +199,7 @@ func loadRuleGroups(ctx context.Context, logger log.Printer, a *args) (map[strin
 		"hello": {
 			&tempDummyRule{
 				name: "world",
-				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message) (stop bool, err error) {
+				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message, _ daemon.Tagger) (stop bool, err error) {
 					return false, errors.New("world rule fails with error")
 				},
 			},
@@ -253,7 +253,7 @@ func (pct *percent) UnmarshalText(b []byte) error {
 }
 
 // todo: delete
-type tempDummyRuleFunc func(ctx context.Context, logger log.Printer, msg *daemon.Message) (stop bool, err error)
+type tempDummyRuleFunc func(ctx context.Context, logger log.Printer, msg *daemon.Message, _ daemon.Tagger) (stop bool, err error)
 
 // todo: delete
 type tempDummyRule struct {
@@ -267,6 +267,6 @@ func (todoDelete *tempDummyRule) String() string {
 }
 
 // todo: delete
-func (todoDelete *tempDummyRule) Eval(ctx context.Context, logger log.Printer, msg *daemon.Message) (stop bool, err error) {
-	return todoDelete.f(ctx, logger, msg)
+func (todoDelete *tempDummyRule) Eval(ctx context.Context, logger log.Printer, msg *daemon.Message, tagger daemon.Tagger) (stop bool, err error) {
+	return todoDelete.f(ctx, logger, msg, tagger)
 }
