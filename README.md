@@ -1,28 +1,36 @@
 # reee-evolution
 Email filter for Evolution
 
-SQLite3: https://github.com/mattn/go-sqlite3
+JavaScript: https://github.com/dop251/goja
 
-Rough design:
-    There are two programs, a daemon (reeed) and a CLI (reee)
-    In version 1.x, you have to build the daemon yourself to provide your own rules.
-        If there's ever a version 2.x, reeed will know how to parse rules from text. 
-    The CLI is generic, everyone uses the same code.
-    They communicate over a Unix socket.
+Rough design of JavaScript part.
 
-    CLI has these jobs:
-        1. Parse args.
-        2. If in listing or help mode, query CLI for available groups/rules.
-        3. If in filter mode, forward selected group/rule (args) and message (stdin) to reeed and return output/exit code from reeed.
-        4. Read logs back from daemon and log anything to stderr at reasonable verbosity.
+    --- init ---
+    1. Create an instance of Runtime. https://pkg.go.dev/github.com/dop251/goja#Runtime
+    2. Export a rule registration hook into the Runtime using Runtime.Set
+    3. Load the user's rules.js files from ~/.config/reee/rules.js and compile it,
+       using its containing directory as the CWD for the opration. The assumption
+       is that compiling it will cause it to load other dependent files. Otherwise
+       probably need to also implement some kind of require/import directive,
+       whatever is normal for JS.
+    4. Run the compiled program. The assumption is this should allow the JS
+       program to register the groups/rules back using the rule registration
+       hook, #2.
 
-    Daemon has these jobs.
-        1. Live a long time.
-        2. When queried for list, provide a listing of available rules/groups.
-        3. When queried for filter, execute the requeted group or group/rule on the input message.
-        4. Keep an LRU of recent emails in memory and look up by hash to avoid repeat parsing.
-        5. Log at reasonable verbosity, specified as 
-        6. Sample and write results to sqlite3.
-
-
+    --- rule evaluation ---
+    1. Create proxy/wrapper values for Msg and Tagger. ("Marshalling")
+    2. Call the designated JS callable that was registered for that rule.
+    3. Handle any error and the return value which should be a bool. ("Unmarshalling")
     
+    (Because of the concurrency issue below we might want to have dynamic binding
+     from "JSRule" Go objects to the actual JS callables. However, that's a
+     problem also because having multiple Runtimes implies the JS code might
+     get reloaded several times which implies the groups and rules could change,
+     which is very unpleasant. So it seems like the right thing to do is just
+     serialize individual rule evaluation calls thru one Runtime tknowing it's a bottleneck.)
+    
+
+    --- issues ---
+    for "true" multi-programming we probably need a bunch of Runtimes because
+    they are not safe for concurrency and there's a risk that the goja library's
+    bookkeeping could break if several goroutines use them at a time.
