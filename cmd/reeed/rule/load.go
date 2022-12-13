@@ -7,7 +7,6 @@ import (
 	"runtime/debug"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/dop251/goja"
 	"github.com/gogama/reee-evolution/daemon"
@@ -105,7 +104,7 @@ func installAddRuleHook(set *GroupSet, cont *vmContainer) *jsHookContainer {
 			}
 		}()
 		if len(call.Arguments) != 1 {
-			throwJSException(vm, "reeed: addRules must receive at least 1 argument")
+			throwJSException(vm, "reeed: addRules() must receive at least 1 argument")
 		}
 		rm, err := unmarshalRuleMap(vm, call.Arguments[0])
 		if err != nil {
@@ -134,7 +133,7 @@ func installAddRuleHook(set *GroupSet, cont *vmContainer) *jsHookContainer {
 			ruleCandidates := rm[g]
 			for i, r := range ruleCandidates {
 				var rule *jsRule
-				rule, err = unmarshalRule(vm, r, cont, i, g)
+				rule, err = unmarshalRule(vm, r, cont, i, group)
 				if err != nil {
 					throwJSException(vm, err)
 				}
@@ -157,10 +156,11 @@ func installAddRuleHook(set *GroupSet, cont *vmContainer) *jsHookContainer {
 }
 
 type vmContainer struct {
-	path string
-	id   int
-	vm   *goja.Runtime
-	mu   sync.Mutex
+	path        string
+	id          int
+	vm          *goja.Runtime
+	mu          sync.Mutex
+	loggerProto *goja.Object
 }
 
 func (cont *vmContainer) acquire(ctx context.Context) error {
@@ -178,43 +178,7 @@ type jsGroup struct {
 	rulesByName map[string]*jsRule
 	name        string
 }
-type jsRule struct {
-	parent *jsGroup
-	cont   *vmContainer
-	name   string
-	f      ruleFunc
-}
 
-func (r *jsRule) String() string {
-	return r.name
-}
-
-func (r *jsRule) Eval(ctx context.Context, logger log.Printer, msg *daemon.Message, tagger daemon.Tagger) (stop bool, err error) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	err = r.cont.acquire(timeoutCtx)
-	if err != nil {
-		return false, err
-	}
-	defer r.cont.release()
-
-	jsMsg := marshalMsg(r.cont.vm, msg, tagger)
-	jsLogger := marshalLogger(r.cont.vm, logger)
-
-	jsStop, err := r.f(jsMsg, jsLogger)
-	if err != nil {
-		return false, err
-	}
-
-	stop = jsStop.ToBoolean()
-
-	// TODO: Delete temporary code here
-	log.Verbose(logger, "RULE %s RETURNED %t.", r.name, stop)
-
-	return
-}
-
-type ruleFunc func(msg goja.Value, logger goja.Value) (goja.Value, error)
 type ruleMap map[string][]*goja.Object
 
 func unmarshalRuleMap(runtime *goja.Runtime, v goja.Value) (rm ruleMap, err error) {
@@ -230,52 +194,6 @@ func unmarshalRuleMap(runtime *goja.Runtime, v goja.Value) (rm ruleMap, err erro
 	return
 }
 
-func unmarshalRule(vm *goja.Runtime, o *goja.Object, cont *vmContainer, i int, g string) (rule *jsRule, err error) {
-	keys := o.Keys()
-	var name string
-	var f ruleFunc
-	for _, key := range keys {
-		switch key {
-		case "name":
-			name = o.Get("name").String()
-			if name == "" {
-				err = fmt.Errorf("reeed: blank rule name: rule %d in group %s", i, g)
-				return
-			}
-		case "rule":
-			fv := o.Get("rule")
-			err = vm.ExportTo(fv, &f)
-			if err != nil {
-				err = fmt.Errorf("reeed: can't unmarshal rule function: rule %d in group %s: %s", i, g, err)
-				return
-			}
-		}
-		if name != "" && f != nil {
-			break
-		}
-	}
-	if name == "" {
-		err = fmt.Errorf("reeed: can't determine rule name: rule %d in group %s", i, g)
-		return
-	}
-	// TODO: Validation on rule name here please.
-	rule = &jsRule{
-		cont: cont,
-		name: name,
-		f:    f,
-	}
-	return
-}
-
-func marshalMsg(vm *goja.Runtime, msg *daemon.Message, tagger daemon.Tagger) goja.Value {
-	// TODO:
-	return goja.Undefined()
-}
-
-func marshalLogger(vm *goja.Runtime, logger log.Printer) goja.Value {
-	// TODO:
-	return goja.Undefined()
-}
 func throwJSException(vm *goja.Runtime, value any) {
 	panic(vm.ToValue(value)) // goja converts the panic to a JS exception
 }

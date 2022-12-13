@@ -37,7 +37,7 @@ func newCmdContext(d *Daemon, connID uint64, r *bufio.Reader, w *bufio.Writer, c
 		cmdID:     cmd.ID,
 		args:      cmd.Args,
 		isEOF:     isEOF,
-		logPrefix: fmt.Sprintf("[conn %d, cmd %s]: ", connID, cmd.ID),
+		logPrefix: fmt.Sprintf("[conn %d, cmd %s] ", connID, cmd.ID),
 		lvl:       [3]log.Level{cmd.Level, cmd.Level, log.NormalLevel},
 	}
 	if leveler, ok := d.Logger.(log.Leveler); ok {
@@ -52,25 +52,26 @@ func (ctx *cmdContext) Normal(format string, v ...interface{}) {
 	if log.NormalLevel > ctx.lvl[0] {
 		return
 	}
-	ctx.Print(log.NormalLevel, fmt.Sprintf(ctx.logPrefix+format, v...))
+	ctx.Print(log.NormalLevel, fmt.Sprintf(format, v...))
 }
 
 func (ctx *cmdContext) Verbose(format string, v ...interface{}) {
 	if log.VerboseLevel > ctx.lvl[0] {
 		return
 	}
-	ctx.Print(log.VerboseLevel, fmt.Sprintf(ctx.logPrefix+format, v...))
+	ctx.Print(log.VerboseLevel, fmt.Sprintf(format, v...))
 }
 
 func (ctx *cmdContext) Print(lvl log.Level, msg string) {
 	if lvl > ctx.lvl[0] {
 		return
 	}
+	prefixedMsg := ctx.logPrefix + msg
 	var wg sync.WaitGroup
 	if lvl <= ctx.lvl[1] && ctx.logErr == nil {
 		wg.Add(1)
 		go func() {
-			err := protocol.WriteLog(ctx.w, lvl, msg)
+			err := protocol.WriteLog(ctx.w, lvl, prefixedMsg)
 			if err != nil {
 				ctx.logErr = err
 				log.Normal(ctx.d.Logger, "[conn %d, cmd %s]: failed to log message: %s", ctx.connID, ctx.cmdID, err.Error())
@@ -80,7 +81,7 @@ func (ctx *cmdContext) Print(lvl log.Level, msg string) {
 		}()
 	}
 	if lvl <= ctx.lvl[2] {
-		ctx.d.Logger.Print(lvl, msg)
+		ctx.d.Logger.Print(lvl, prefixedMsg)
 	}
 	wg.Wait()
 }

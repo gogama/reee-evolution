@@ -7,7 +7,12 @@ import (
 	"github.com/gogama/reee-evolution/daemon"
 )
 
-type JSMessage struct {
+func marshalMessage(vm *goja.Runtime, msg *daemon.Message, tagger daemon.Tagger) goja.Value {
+	// TODO:
+	return goja.Undefined()
+}
+
+type jsMessage struct {
 	runtime *goja.Runtime
 	msg     *daemon.Message
 
@@ -21,11 +26,11 @@ type JSMessage struct {
 	fullText goja.Value
 }
 
-func (m *JSMessage) From() goja.Value {
+func (m *jsMessage) From() goja.Value {
 	return m.cachedAddress(&m.from, "From")
 }
 
-func (m *JSMessage) cachedAddress(field *goja.Value, headerName string) goja.Value {
+func (m *jsMessage) cachedAddress(field *goja.Value, headerName string) goja.Value {
 	if *field == nil {
 		var ca jsCachedAddress
 		headerValue := m.msg.Envelope.GetHeader(headerName)
