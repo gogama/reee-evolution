@@ -132,6 +132,7 @@ func (d *Daemon) handle(connID uint64, conn net.Conn) {
 	w := bufio.NewWriter(conn)
 
 	ctx := newCmdContext(d, connID, r, w, cmd, isEOF)
+	defer ctx.cancel()
 	ctx.Verbose("daemon received %v", cmd)
 
 	var data []byte
@@ -224,9 +225,9 @@ func handleEval(ctx *cmdContext) error {
 	if r != "" {
 		for i := range rules {
 			if r == rules[i].String() {
-				rules[0] = rules[i]
-				rules = rules[0:]
+				rules = []Rule{rules[i]}
 				r = ""
+				break
 			}
 		}
 		if r == "" {
@@ -294,7 +295,7 @@ func handleEval(ctx *cmdContext) error {
 			startTime:  time.Now(),
 			rule:       rules[i].String(),
 		}
-		stop, ruleEvalErr = rules[i].Eval(ctx, ctx, msg, rer)
+		stop, ruleEvalErr = rules[i].Eval(ctx.ctx, ctx, msg, rer)
 		rer.endTime = time.Now()
 		rer.stop = stop
 		rer.err = ruleEvalErr

@@ -4,13 +4,15 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"sync"
+
 	"github.com/gogama/reee-evolution/log"
 	"github.com/gogama/reee-evolution/protocol"
-	"sync"
 )
 
 type cmdContext struct {
-	context.Context
+	ctx       context.Context
+	cancel    context.CancelFunc
 	d         *Daemon
 	connID    uint64
 	r         *bufio.Reader
@@ -24,7 +26,10 @@ type cmdContext struct {
 }
 
 func newCmdContext(d *Daemon, connID uint64, r *bufio.Reader, w *bufio.Writer, cmd protocol.Command, isEOF bool) cmdContext {
+	childCtx, cancel := context.WithCancel(d.ctx)
 	ctx := cmdContext{
+		ctx:       childCtx,
+		cancel:    cancel,
 		d:         d,
 		connID:    connID,
 		r:         r,
@@ -43,7 +48,6 @@ func newCmdContext(d *Daemon, connID uint64, r *bufio.Reader, w *bufio.Writer, c
 	}
 	return ctx
 }
-
 func (ctx *cmdContext) Normal(format string, v ...interface{}) {
 	if log.NormalLevel > ctx.lvl[0] {
 		return

@@ -10,7 +10,7 @@ func File(dir, suffix string) string {
 	return path.Join(dir, name+suffix)
 }
 
-func Dir(dirFunc func() (string, error), create bool) (string, error) {
+func Dir(dirFunc func() (string, error)) (string, error) {
 	dir, err := dirFunc()
 	if err != nil {
 		return "", err

@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/alexflint/go-arg v1.4.3
+	github.com/dop251/goja v0.0.0-20221118162653-d4bf6fde1b86
 	github.com/gofrs/uuid v4.3.1+incompatible
 	github.com/gogama/policy-lru v0.0.0-20221123213906-b3cf3295d8c5
 	github.com/jhillyerd/enmime v0.10.1
@@ -13,6 +14,8 @@ require (
 require (
 	github.com/alexflint/go-scalar v1.1.0 // indirect
 	github.com/cention-sany/utf7 v0.0.0-20170124080048-26cad61bd60a // indirect
+	github.com/dlclark/regexp2 v1.7.0 // indirect
+	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/gogs/chardet v0.0.0-20191104214054-4b6791f73a28 // indirect
 	github.com/jaytaylor/html2text v0.0.0-20200412013138-3577fbdbcff7 // indirect
 	github.com/mattn/go-runewidth v0.0.12 // indirect

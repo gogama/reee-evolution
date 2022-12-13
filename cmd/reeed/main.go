@@ -2,16 +2,18 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/gogama/reee-evolution/cmd/reeed/rule"
 
 	"github.com/alexflint/go-arg"
 	"github.com/gogama/reee-evolution/cmd/reeed/cache"
@@ -28,6 +30,7 @@ type args struct {
 	Network   string  `arg:"-n,--net,env:REEE_NET" help:"listen on network"`
 	DBFile    string  `arg:"--db,env:REEE_DB" help:"path to email events database"`
 	NoDB      bool    `arg:"--no-db" help:"don't log events to database"`
+	RulePath  string  `arg:"--rules,env:REEE_RULES help:path to directory containing rule scripts"`
 	SamplePct percent `arg:"-s,--sample" help:"sample percentage, e.g. 25%" default:"1%"`
 	Verbose   bool    `arg:"-v,--verbose" help:"enable verbose logging"`
 }
@@ -47,8 +50,11 @@ func main() {
 		Network: network,
 		Address: address,
 	}
-	if dir, err := reeeuse.Dir(os.UserCacheDir, false); err == nil {
+	if dir, err := reeeuse.Dir(os.UserCacheDir); err == nil {
 		a.DBFile = reeeuse.File(dir, ".sqlite3")
+	}
+	if dir, err := reeeuse.Dir(os.UserConfigDir); err == nil {
+		a.RulePath = dir
 	}
 
 	// Parse arguments. Exit early on parsing error, validation error,
@@ -89,6 +95,9 @@ func runDaemon(parent context.Context, w io.Writer, a *args) error {
 
 	// Load the rules.
 	groups, err := loadRuleGroups(signalCtx, logger, a)
+	if err != nil {
+		return err
+	}
 
 	// Create or open the SQLite3-based persistent store.
 	var s daemon.MessageStore
@@ -171,40 +180,26 @@ func runDaemon(parent context.Context, w io.Writer, a *args) error {
 }
 
 func loadRuleGroups(ctx context.Context, logger log.Printer, a *args) (map[string][]daemon.Rule, error) {
-	// TODO: Load some real rule groups
+	if info, err := os.Lstat(a.RulePath); err != nil {
+		// TODO: Log error and fail out.
+	} else if !info.IsDir() {
+		// TODO: Log warning and fail out.
+	}
 
-	return map[string][]daemon.Rule{
-		"foo": {
-			&tempDummyRule{
-				name: "bar",
-				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message, _ daemon.Tagger) (stop bool, err error) {
-					log.Verbose(logger, "bar rule returns (false, nil)")
-					return false, nil
-				},
-			},
-			&tempDummyRule{
-				name: "baz",
-				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message, _ daemon.Tagger) (stop bool, err error) {
-					log.Verbose(logger, "baz rule returns (true, nil)")
-					return true, nil
-				},
-			},
-			&tempDummyRule{
-				name: "qux",
-				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message, _ daemon.Tagger) (stop bool, err error) {
-					panic("qux rule does not get called...")
-				},
-			},
-		},
-		"hello": {
-			&tempDummyRule{
-				name: "world",
-				f: func(ctx context.Context, logger log.Printer, msg *daemon.Message, _ daemon.Tagger) (stop bool, err error) {
-					return false, errors.New("world rule fails with error")
-				},
-			},
-		},
-	}, nil
+	var groups rule.GroupSet
+
+	// Find all the JavaScript files and load them.
+	err := filepath.WalkDir(a.RulePath, func(path string, d os.DirEntry, err error) error {
+		if d.IsDir() || !strings.HasSuffix(path, ".js") {
+			return nil
+		}
+		return groups.Load(ctx, logger, path)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return groups.ToMap(), nil
 }
 
 type percent float64
