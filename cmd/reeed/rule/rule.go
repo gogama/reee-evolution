@@ -32,7 +32,10 @@ func (r *jsRule) Eval(ctx context.Context, logger log.Printer, msg *daemon.Messa
 	}
 	defer r.cont.release()
 
-	m := marshalMessage(r.cont.vm, msg, tagger)
+	m, err := marshalMessage(r.cont, msg, tagger)
+	if err != nil {
+		return false, err
+	}
 	l, err := marshalLogger(r.parent.name, r.name, r.cont, logger)
 	if err != nil {
 		return false, err

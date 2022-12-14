@@ -1,106 +1,242 @@
 package rule
 
 import (
+	"fmt"
 	"net/mail"
+	"reflect"
+	"unsafe"
 
 	"github.com/dop251/goja"
 	"github.com/gogama/reee-evolution/daemon"
 )
 
-func marshalMessage(vm *goja.Runtime, msg *daemon.Message, tagger daemon.Tagger) goja.Value {
-	// TODO:
-	return goja.Undefined()
+func marshalMessage(cont *vmContainer, msg *daemon.Message, tagger daemon.Tagger) (goja.Value, error) {
+	if cont.msgProto == nil {
+		proto, err := jsMessagePrototype(cont)
+		if err != nil {
+			return nil, err
+		}
+		cont.msgProto = proto
+	}
+	m := &jsMessage{
+		msg:    msg,
+		tagger: tagger,
+	}
+	o := cont.vm.ToValue(m).ToObject(cont.vm)
+	err := o.SetPrototype(cont.msgProto)
+	if err != nil {
+		return nil, err
+	}
+	return o, nil
+}
+
+var jsMessageMailboxHeaderProps = []struct {
+	propName   string
+	headerName string
+}{
+	{"from", "From"},
+	{"sender", "Sender"},
+	{"replyTo", "Reply-To"},
+	{"to", "To"},
+	{"cc", "Cc"},
+	{"bcc", "Bcc"},
+}
+
+func jsMessagePrototype(cont *vmContainer) (*goja.Object, error) {
+	proto := cont.vm.NewObject()
+	// Define properties relating to email headers that contain mailboxes.
+	for _, prop := range jsMessageMailboxHeaderProps {
+		err := jsMessagePrototypeDefineAddressesProp(cont, proto, prop.propName, prop.headerName)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return proto, nil
 }
 
 type jsMessage struct {
-	runtime *goja.Runtime
-	msg     *daemon.Message
+	msg    *daemon.Message
+	tagger daemon.Tagger
 
 	// Cached field values.
-	from     goja.Value // cachedAddress
-	to       goja.Value // cachedAddress
-	subject  goja.Value // string
-	date     goja.Value // time.Time
-	cc       goja.Value // cachedAddress
-	bcc      goja.Value // cachedAddress
-	fullText goja.Value
+	id goja.Value // string
+
+	from    goja.Value // *jsAddresses
+	sender  goja.Value // *jsAddresses
+	replyTo goja.Value // *jsAddresses
+	to      goja.Value // *jsAddresses
+	cc      goja.Value // *jsAddresses
+	bcc     goja.Value // *jsAddresses
+
+	subject     goja.Value // string
+	date        goja.Value // time.Time
+	headers     goja.Value
+	attachments goja.Value
+	textPart    goja.Value
+	htmlPart    goja.Value
+	fullText    goja.Value
+	tags        goja.Value
 }
 
-func (m *jsMessage) From() goja.Value {
-	return m.cachedAddress(&m.from, "From")
+var jsMessageType = reflect.TypeOf(jsMessage{})
+
+func jsMessagePrototypeDefineAddressesProp(cont *vmContainer, proto *goja.Object, propName, headerName string) error {
+	return jsMessagePrototypeDefineProp(cont.vm, proto, propName, func(msg *daemon.Message) string {
+		return msg.Envelope.GetHeader(headerName)
+	}, func(addresses string) (goja.Value, error) {
+		return marshalAddresses(cont, addresses)
+	})
 }
 
-func (m *jsMessage) cachedAddress(field *goja.Value, headerName string) goja.Value {
-	if *field == nil {
-		var ca jsCachedAddress
-		headerValue := m.msg.Envelope.GetHeader(headerName)
-		ca.headerValue = m.runtime.ToValue(headerValue)
-		list, err := mail.ParseAddressList(headerValue)
-		if err != nil {
-			// TODO: Somehow log something here. We should have a bound logger.
-		} else {
-			ca.mailboxes = make([]goja.Value, len(list))
-			ca.length = m.runtime.ToValue(len(list))
-			for i := range list {
-				ca.mailboxes[i] = m.runtime.ToValue(jsMailbox{
-					name:    m.runtime.ToValue(list[i].Name),
-					address: m.runtime.ToValue(list[i].Address),
-				})
+func jsMessagePrototypeDefineProp[T any](vm *goja.Runtime, proto *goja.Object, propName string, get func(*daemon.Message) T, convert func(T) (goja.Value, error)) error {
+	// Determine the offset within the structure of the propField which
+	// contains the cached value.
+	var propField reflect.StructField
+	var ok bool
+	if propField, ok = jsMessageType.FieldByName(propName); !ok {
+		panic(fmt.Sprintf("property field %q not found in %v", propName, jsMessageType))
+	}
+
+	// Add a property accessor to the prototype which checks for the
+	// cached property at the given offset within the message, and if
+	// it is not yet cached, fetches it from the underlying daemon
+	// message.
+	return defineGetterProperty(vm, proto, propName, func(this any) (goja.Value, error) {
+		if this, ok := this.(*jsMessage); ok {
+			propPtr := (*goja.Value)(unsafe.Add(unsafe.Pointer(this), propField.Offset))
+			if *propPtr != nil {
+				return *propPtr, nil
 			}
-			*field = m.runtime.ToValue(ca)
+			rawValue := get(this.msg)
+			propValue, err := convert(rawValue)
+			if err != nil {
+				return nil, err
+			}
+			*propPtr = propValue
+			return propValue, nil
+		}
+		return nil, errUnexpectedType(&jsMessage{}, this)
+	})
+}
+
+func marshalAddresses(cont *vmContainer, addresses string) (goja.Value, error) {
+	if cont.addressesProto == nil {
+		proto, err := jsAddressesPrototype(cont.vm)
+		if err != nil {
+			return nil, err
+		}
+		cont.addressesProto = proto
+	}
+	list, err := mail.ParseAddressList(addresses)
+	if err != nil {
+		// TODO: Find a way to log this and just continue
+		fmt.Println("ERROR", err, "TODO: fins a way to log this and continue")
+		list = nil
+	}
+
+	a := make([]goja.Value, len(list))
+	for i := range list {
+		a[i], err = marshalMailbox(cont, list[i])
+		if err != nil {
+			return nil, err
 		}
 	}
-	return *field
-}
-
-type jsCachedAddress struct {
-	headerValue goja.Value
-	length      goja.Value
-	mailboxes   []goja.Value
-}
-
-func (ca *jsCachedAddress) Header() goja.Value {
-	return ca.headerValue
-}
-
-func (ca *jsCachedAddress) Length() goja.Value {
-	return ca.length
-}
-
-func (ca *jsCachedAddress) Item(i int) goja.Value {
-	if 0 <= i && i <= len(ca.mailboxes) {
-		return ca.mailboxes[i]
+	as := &jsAddresses{
+		header:    cont.vm.ToValue(addresses),
+		mailboxes: cont.vm.ToValue(a),
 	}
-	return goja.Undefined()
+	o := cont.vm.ToValue(as).ToObject(cont.vm)
+	err = o.SetPrototype(cont.addressesProto)
+	if err != nil {
+		return nil, err
+	}
+	return o, nil
+}
+
+func jsAddressesPrototype(vm *goja.Runtime) (*goja.Object, error) {
+	proto := vm.NewObject()
+	err := defineGetterProperty(vm, proto, "header", func(this any) (goja.Value, error) {
+		if this, ok := this.(*jsAddresses); ok {
+			return this.header, nil
+		}
+		return nil, errUnexpectedType(&jsAddresses{}, this)
+	})
+	if err != nil {
+		return nil, err
+	}
+	err = defineGetterProperty(vm, proto, "mailboxes", func(this any) (goja.Value, error) {
+		if this, ok := this.(*jsAddresses); ok {
+			return this.mailboxes, nil
+		}
+		return nil, errUnexpectedType(&jsAddresses{}, this)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return proto, nil
+}
+
+type jsAddresses struct {
+	header    goja.Value
+	mailboxes goja.Value
+}
+
+func marshalMailbox(cont *vmContainer, mailbox *mail.Address) (goja.Value, error) {
+	if cont.mailboxProto == nil {
+		proto, err := jsMailboxPrototype(cont.vm)
+		if err != nil {
+			return nil, err
+		}
+		cont.mailboxProto = proto
+	}
+	m := &jsMailbox{
+		name:    cont.vm.ToValue(mailbox.Name),
+		address: cont.vm.ToValue(mailbox.Address),
+	}
+	o := cont.vm.ToValue(m).ToObject(cont.vm)
+	err := o.SetPrototype(cont.mailboxProto)
+	if err != nil {
+		return nil, err
+	}
+	return o, nil
+}
+
+func jsMailboxPrototype(vm *goja.Runtime) (*goja.Object, error) {
+	proto := vm.NewObject()
+	err := defineGetterProperty(vm, proto, "name", func(this any) (goja.Value, error) {
+		if this, ok := this.(*jsMailbox); ok {
+			return this.name, nil
+		}
+		return nil, errUnexpectedType(&jsMailbox{}, this)
+	})
+	if err != nil {
+		return nil, err
+	}
+	err = defineGetterProperty(vm, proto, "address", func(this any) (goja.Value, error) {
+		if this, ok := this.(*jsMailbox); ok {
+			return this.address, nil
+		}
+		return nil, errUnexpectedType(&jsMailbox{}, this)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return proto, nil
+}
+
+// TODO: Move this elsewhere.
+func defineGetterProperty(vm *goja.Runtime, proto *goja.Object, propName string, getter func(any) (goja.Value, error)) error {
+	return proto.DefineAccessorProperty(propName, vm.ToValue(func(call goja.FunctionCall, vm2 *goja.Runtime) goja.Value {
+		assertGetter(call, vm, propName)
+		value, err2 := getter(call.This.Export())
+		if err2 != nil {
+			throwJSException(vm, err2)
+		}
+		return value
+	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_FALSE)
 }
 
 type jsMailbox struct {
 	name    goja.Value // string
 	address goja.Value // string
 }
-
-func (m *jsMailbox) Name() goja.Value {
-	return m.name
-}
-
-func (m *jsMailbox) Address() goja.Value {
-	return m.address
-}
-
-/**
-
-Desired JavaScript access of mail item.
-
-	m.subject
-	m.fullText
-	m.date
-	m.from.header
-	m.from.item(0).
-	m.from.item(0).address
-	m.toHeader
-	m.to[0].name
-	m.to[0].address
-	m.ccHeader
-	m.cc[0].name
-	m.cc[0].address
-*/

@@ -45,7 +45,7 @@ func jsLogVerbose(call goja.FunctionCall, vm *goja.Runtime) goja.Value {
 	var this *jsLogger
 	var ok bool
 	if this, ok = this_.(*jsLogger); !ok {
-		throwJSException(vm, fmt.Sprintf("reeed: expected this to be a *jsLogger, but it is a %T", this_))
+		throwJSException(vm, errUnexpectedType(&jsLogger{}, this_))
 	}
 	if !this.hasLevel {
 		this.isVerbose = log.LevelOf(this.logger) >= log.VerboseLevel

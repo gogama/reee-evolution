@@ -156,11 +156,14 @@ func installAddRuleHook(set *GroupSet, cont *vmContainer) *jsHookContainer {
 }
 
 type vmContainer struct {
-	path        string
-	id          int
-	vm          *goja.Runtime
-	mu          sync.Mutex
-	loggerProto *goja.Object
+	path           string
+	id             int
+	vm             *goja.Runtime
+	mu             sync.Mutex
+	msgProto       *goja.Object
+	loggerProto    *goja.Object
+	addressesProto *goja.Object
+	mailboxProto   *goja.Object
 }
 
 func (cont *vmContainer) acquire(ctx context.Context) error {
@@ -194,8 +197,21 @@ func unmarshalRuleMap(runtime *goja.Runtime, v goja.Value) (rm ruleMap, err erro
 	return
 }
 
+// TODO: Move this somewhere appropriate.
+func assertGetter(call goja.FunctionCall, vm *goja.Runtime, name string) {
+	if len(call.Arguments) != 0 {
+		throwJSException(vm, fmt.Sprintf("reeed: %s may only be used as a property getter", name))
+	}
+}
+
+// TODO: Move this somewhere appropriate.
 func throwJSException(vm *goja.Runtime, value any) {
 	panic(vm.ToValue(value)) // goja converts the panic to a JS exception
+}
+
+// TODO: Move this somewhere appropriate.
+func errUnexpectedType(expected, actual any) error {
+	return fmt.Errorf("reeed: expected this to be a %T, but it is a %T", expected, actual)
 }
 
 /**
