@@ -109,6 +109,18 @@ func (rec *RuleEvalRecord) Err() error {
 	return rec.err
 }
 
+func (rec *RuleEvalRecord) Keys() []string {
+	msg := rec.evalRecord.Message
+	lock := msg.lock
+	lock.RLock()
+	defer lock.RUnlock()
+	keys := make([]string, 0, len(msg.metadata.tags))
+	for key := range msg.metadata.tags {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
 func (rec *RuleEvalRecord) GetTag(key string) (value string, hit bool) {
 	msg := rec.evalRecord.Message
 	lock := msg.lock

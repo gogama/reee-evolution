@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/mail"
 	"reflect"
+	"time"
 	"unsafe"
 
 	"github.com/dop251/goja"
@@ -42,6 +43,14 @@ var jsMessageMailboxHeaderProps = []struct {
 	{"bcc", "Bcc"},
 }
 
+var jsMessageStringHeaderProps = []struct {
+	propName   string
+	headerName string
+}{
+	{"id", "Message-Id"},
+	{"subject", "Subject"},
+}
+
 func jsMessagePrototype(cont *vmContainer) (*goja.Object, error) {
 	proto := cont.vm.NewObject()
 	// Define properties relating to email headers that contain mailboxes.
@@ -51,6 +60,48 @@ func jsMessagePrototype(cont *vmContainer) (*goja.Object, error) {
 			return nil, err
 		}
 	}
+	// Define properties relating to email headers that contain string
+	// values.
+	for _, prop := range jsMessageStringHeaderProps {
+		err := jsMessagePrototypeDefineProp(cont.vm, proto, prop.propName, func(msg *daemon.Message) string {
+			return msg.Envelope.GetHeader(prop.headerName)
+		}, func(value string) (goja.Value, error) {
+			return cont.vm.ToValue(value), nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Define properties relating to the standard parts.
+	err := jsMessagePrototypeDefineProp(cont.vm, proto, "text", func(msg *daemon.Message) string {
+		return msg.Envelope.Text
+	}, func(value string) (goja.Value, error) {
+		return cont.vm.ToValue(value), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	err = jsMessagePrototypeDefineProp(cont.vm, proto, "html", func(msg *daemon.Message) string {
+		return msg.Envelope.HTML
+	}, func(value string) (goja.Value, error) {
+		return cont.vm.ToValue(value), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Define date/time properties.
+	err = jsMessagePrototypeDefineProp(cont.vm, proto, "date", func(msg *daemon.Message) time.Time {
+		t, err := mail.ParseDate(msg.Envelope.GetHeader("Date"))
+		if err != nil {
+			return time.Time{}
+		}
+		return t
+	}, func(t time.Time) (goja.Value, error) {
+		return marshalDate(cont.vm, t)
+	})
+
+	// Message prototype is ready.
+
 	return proto, nil
 }
 
@@ -58,30 +109,37 @@ type jsMessage struct {
 	msg    *daemon.Message
 	tagger daemon.Tagger
 
-	// Cached field values.
-	id goja.Value // string
+	// Cached address fields.
+	from    goja.Value
+	sender  goja.Value
+	replyTo goja.Value
+	to      goja.Value
+	cc      goja.Value
+	bcc     goja.Value
 
-	from    goja.Value // *jsAddresses
-	sender  goja.Value // *jsAddresses
-	replyTo goja.Value // *jsAddresses
-	to      goja.Value // *jsAddresses
-	cc      goja.Value // *jsAddresses
-	bcc     goja.Value // *jsAddresses
+	// Cached string fields.
+	id      goja.Value
+	subject goja.Value
+	text    goja.Value
+	html    goja.Value
 
-	subject     goja.Value // string
-	date        goja.Value // time.Time
-	headers     goja.Value
+	// Cached time.Time fields.
+	date goja.Value
+
+	// Cached lazy headers.
+	headers goja.Value
+
+	// Cached materialized array of attachments.
 	attachments goja.Value
-	textPart    goja.Value
-	htmlPart    goja.Value
-	fullText    goja.Value
-	tags        goja.Value
+
+	tags goja.Value
 }
 
 var jsMessageType = reflect.TypeOf(jsMessage{})
 
 func jsMessagePrototypeDefineAddressesProp(cont *vmContainer, proto *goja.Object, propName, headerName string) error {
 	return jsMessagePrototypeDefineProp(cont.vm, proto, propName, func(msg *daemon.Message) string {
+		// TODO: Switch to using msg.Envelope.AddressList(...), it is more tolerant of errors.
 		return msg.Envelope.GetHeader(headerName)
 	}, func(addresses string) (goja.Value, error) {
 		return marshalAddresses(cont, addresses)
@@ -240,3 +298,28 @@ type jsMailbox struct {
 	name    goja.Value // string
 	address goja.Value // string
 }
+
+/**
+  How should headers behave? SHOULD BE LAZY.
+	msg.headers.length -> Number of headers.
+	msg.headers.keys -> Array of header keys.
+	msg.headers.get("foo") -> header value.
+
+  How should attachments behave? SHOULD BE MATERIALIZED ARRAY.
+	msg.attachments -> array
+	msg.attachments.length (array length)
+	msg.attachments[0].fileName
+	msg.attachments[0].fileModDate
+	msg.attachments[0].contentType
+
+		[Forget about trying to handle actual content bytes/length.]
+
+  How should tags behave? SIMILAR TO HEADERS.
+    msg.tags.length -> Number of tags.
+    msg.tags.keys -> Array of tag keys.
+	msg.tags.get("foo") -> tag value
+	msg.tags.deleteKey("foo")
+
+  How should full content bytes behave?
+    Forget about it. Too complex, unlikely to be useful.
+*/

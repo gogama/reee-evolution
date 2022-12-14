@@ -8,6 +8,7 @@ import (
 )
 
 type Tagger interface {
+	Keys() []string
 	GetTag(key string) (value string, hit bool)
 	SetTag(key, value string)
 	DeleteTag(key string)

@@ -71,6 +71,7 @@ func (ctx *cmdContext) Print(lvl log.Level, msg string) {
 	if lvl <= ctx.lvl[1] && ctx.logErr == nil {
 		wg.Add(1)
 		go func() {
+			// FIXME: Need to truncate prefixedMsg at first newline to prevent protocol breakage.
 			err := protocol.WriteLog(ctx.w, lvl, prefixedMsg)
 			if err != nil {
 				ctx.logErr = err
