@@ -63,8 +63,8 @@ func jsMessagePrototype(cont *vmContainer) (*goja.Object, error) {
 	// Define properties relating to email headers that contain string
 	// values.
 	for _, prop := range jsMessageStringHeaderProps {
-		err := jsMessagePrototypeDefineProp(cont.vm, proto, prop.propName, func(msg *daemon.Message) string {
-			return msg.Envelope.GetHeader(prop.headerName)
+		err := jsMessagePrototypeDefineProp(cont.vm, proto, prop.propName, func(msg *jsMessage) string {
+			return msg.msg.Envelope.GetHeader(prop.headerName)
 		}, func(value string) (goja.Value, error) {
 			return cont.vm.ToValue(value), nil
 		})
@@ -73,16 +73,16 @@ func jsMessagePrototype(cont *vmContainer) (*goja.Object, error) {
 		}
 	}
 	// Define properties relating to the standard parts.
-	err := jsMessagePrototypeDefineProp(cont.vm, proto, "text", func(msg *daemon.Message) string {
-		return msg.Envelope.Text
+	err := jsMessagePrototypeDefineProp(cont.vm, proto, "text", func(msg *jsMessage) string {
+		return msg.msg.Envelope.Text
 	}, func(value string) (goja.Value, error) {
 		return cont.vm.ToValue(value), nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	err = jsMessagePrototypeDefineProp(cont.vm, proto, "html", func(msg *daemon.Message) string {
-		return msg.Envelope.HTML
+	err = jsMessagePrototypeDefineProp(cont.vm, proto, "html", func(msg *jsMessage) string {
+		return msg.msg.Envelope.HTML
 	}, func(value string) (goja.Value, error) {
 		return cont.vm.ToValue(value), nil
 	})
@@ -90,8 +90,8 @@ func jsMessagePrototype(cont *vmContainer) (*goja.Object, error) {
 		return nil, err
 	}
 	// Define date/time properties.
-	err = jsMessagePrototypeDefineProp(cont.vm, proto, "date", func(msg *daemon.Message) time.Time {
-		t, err := mail.ParseDate(msg.Envelope.GetHeader("Date"))
+	err = jsMessagePrototypeDefineProp(cont.vm, proto, "date", func(msg *jsMessage) time.Time {
+		t, err := mail.ParseDate(msg.msg.Envelope.GetHeader("Date"))
 		if err != nil {
 			return time.Time{}
 		}
@@ -99,8 +99,28 @@ func jsMessagePrototype(cont *vmContainer) (*goja.Object, error) {
 	}, func(t time.Time) (goja.Value, error) {
 		return marshalDate(cont.vm, t)
 	})
+	if err != nil {
+		return nil, err
+	}
+	// Define lazy map map properties.
+	err = jsMessagePrototypeDefineProp(cont.vm, proto, "headers", func(msg *jsMessage) immutableMap {
+		return headersMap{Envelope: msg.msg.Envelope}
+	}, func(im immutableMap) (goja.Value, error) {
+		return marshalLazyMap(cont.vm, &cont.headersProto, im, nil)
+	})
+	if err != nil {
+		return nil, err
+	}
+	err = jsMessagePrototypeDefineProp(cont.vm, proto, "tags", func(msg *jsMessage) mutableMap {
+		return tagsMap{Tagger: msg.tagger}
+	}, func(mm mutableMap) (goja.Value, error) {
+		return marshalLazyMap(cont.vm, &cont.tagsProto, mm, mm)
+	})
+	if err != nil {
+		return nil, err
+	}
 
-	// Message prototype is ready.
+	// TODO: Define attachments property.
 
 	return proto, nil
 }
@@ -126,27 +146,26 @@ type jsMessage struct {
 	// Cached time.Time fields.
 	date goja.Value
 
-	// Cached lazy headers.
+	// Cached lazy maps.
 	headers goja.Value
+	tags    goja.Value
 
 	// Cached materialized array of attachments.
 	attachments goja.Value
-
-	tags goja.Value
 }
 
 var jsMessageType = reflect.TypeOf(jsMessage{})
 
 func jsMessagePrototypeDefineAddressesProp(cont *vmContainer, proto *goja.Object, propName, headerName string) error {
-	return jsMessagePrototypeDefineProp(cont.vm, proto, propName, func(msg *daemon.Message) string {
+	return jsMessagePrototypeDefineProp(cont.vm, proto, propName, func(msg *jsMessage) string {
 		// TODO: Switch to using msg.Envelope.AddressList(...), it is more tolerant of errors.
-		return msg.Envelope.GetHeader(headerName)
+		return msg.msg.Envelope.GetHeader(headerName)
 	}, func(addresses string) (goja.Value, error) {
 		return marshalAddresses(cont, addresses)
 	})
 }
 
-func jsMessagePrototypeDefineProp[T any](vm *goja.Runtime, proto *goja.Object, propName string, get func(*daemon.Message) T, convert func(T) (goja.Value, error)) error {
+func jsMessagePrototypeDefineProp[T any](vm *goja.Runtime, proto *goja.Object, propName string, get func(*jsMessage) T, convert func(T) (goja.Value, error)) error {
 	// Determine the offset within the structure of the propField which
 	// contains the cached value.
 	var propField reflect.StructField
@@ -159,13 +178,13 @@ func jsMessagePrototypeDefineProp[T any](vm *goja.Runtime, proto *goja.Object, p
 	// cached property at the given offset within the message, and if
 	// it is not yet cached, fetches it from the underlying daemon
 	// message.
-	return defineGetterProperty(vm, proto, propName, func(this any) (goja.Value, error) {
+	return defineGetterProperty(vm, proto, propName, func(_ *goja.Runtime, this any) (goja.Value, error) {
 		if this, ok := this.(*jsMessage); ok {
 			propPtr := (*goja.Value)(unsafe.Add(unsafe.Pointer(this), propField.Offset))
 			if *propPtr != nil {
 				return *propPtr, nil
 			}
-			rawValue := get(this.msg)
+			rawValue := get(this)
 			propValue, err := convert(rawValue)
 			if err != nil {
 				return nil, err
@@ -173,7 +192,7 @@ func jsMessagePrototypeDefineProp[T any](vm *goja.Runtime, proto *goja.Object, p
 			*propPtr = propValue
 			return propValue, nil
 		}
-		return nil, errUnexpectedType(&jsMessage{}, this)
+		return nil, errUnexpectedThisType(&jsMessage{}, this)
 	})
 }
 
@@ -213,20 +232,20 @@ func marshalAddresses(cont *vmContainer, addresses string) (goja.Value, error) {
 
 func jsAddressesPrototype(vm *goja.Runtime) (*goja.Object, error) {
 	proto := vm.NewObject()
-	err := defineGetterProperty(vm, proto, "header", func(this any) (goja.Value, error) {
+	err := defineGetterProperty(vm, proto, "header", func(_ *goja.Runtime, this any) (goja.Value, error) {
 		if this, ok := this.(*jsAddresses); ok {
 			return this.header, nil
 		}
-		return nil, errUnexpectedType(&jsAddresses{}, this)
+		return nil, errUnexpectedThisType(&jsAddresses{}, this)
 	})
 	if err != nil {
 		return nil, err
 	}
-	err = defineGetterProperty(vm, proto, "mailboxes", func(this any) (goja.Value, error) {
+	err = defineGetterProperty(vm, proto, "mailboxes", func(_ *goja.Runtime, this any) (goja.Value, error) {
 		if this, ok := this.(*jsAddresses); ok {
 			return this.mailboxes, nil
 		}
-		return nil, errUnexpectedType(&jsAddresses{}, this)
+		return nil, errUnexpectedThisType(&jsAddresses{}, this)
 	})
 	if err != nil {
 		return nil, err
@@ -261,20 +280,20 @@ func marshalMailbox(cont *vmContainer, mailbox *mail.Address) (goja.Value, error
 
 func jsMailboxPrototype(vm *goja.Runtime) (*goja.Object, error) {
 	proto := vm.NewObject()
-	err := defineGetterProperty(vm, proto, "name", func(this any) (goja.Value, error) {
+	err := defineGetterProperty(vm, proto, "name", func(_ *goja.Runtime, this any) (goja.Value, error) {
 		if this, ok := this.(*jsMailbox); ok {
 			return this.name, nil
 		}
-		return nil, errUnexpectedType(&jsMailbox{}, this)
+		return nil, errUnexpectedThisType(&jsMailbox{}, this)
 	})
 	if err != nil {
 		return nil, err
 	}
-	err = defineGetterProperty(vm, proto, "address", func(this any) (goja.Value, error) {
+	err = defineGetterProperty(vm, proto, "address", func(_ *goja.Runtime, this any) (goja.Value, error) {
 		if this, ok := this.(*jsMailbox); ok {
 			return this.address, nil
 		}
-		return nil, errUnexpectedType(&jsMailbox{}, this)
+		return nil, errUnexpectedThisType(&jsMailbox{}, this)
 	})
 	if err != nil {
 		return nil, err
@@ -283,10 +302,10 @@ func jsMailboxPrototype(vm *goja.Runtime) (*goja.Object, error) {
 }
 
 // TODO: Move this elsewhere.
-func defineGetterProperty(vm *goja.Runtime, proto *goja.Object, propName string, getter func(any) (goja.Value, error)) error {
+func defineGetterProperty(vm *goja.Runtime, proto *goja.Object, propName string, getter func(*goja.Runtime, any) (goja.Value, error)) error {
 	return proto.DefineAccessorProperty(propName, vm.ToValue(func(call goja.FunctionCall, vm2 *goja.Runtime) goja.Value {
 		assertGetter(call, vm, propName)
-		value, err2 := getter(call.This.Export())
+		value, err2 := getter(vm, call.This.Export())
 		if err2 != nil {
 			throwJSException(vm, err2)
 		}
@@ -300,11 +319,6 @@ type jsMailbox struct {
 }
 
 /**
-  How should headers behave? SHOULD BE LAZY.
-	msg.headers.length -> Number of headers.
-	msg.headers.keys -> Array of header keys.
-	msg.headers.get("foo") -> header value.
-
   How should attachments behave? SHOULD BE MATERIALIZED ARRAY.
 	msg.attachments -> array
 	msg.attachments.length (array length)
@@ -313,12 +327,6 @@ type jsMailbox struct {
 	msg.attachments[0].contentType
 
 		[Forget about trying to handle actual content bytes/length.]
-
-  How should tags behave? SIMILAR TO HEADERS.
-    msg.tags.length -> Number of tags.
-    msg.tags.keys -> Array of tag keys.
-	msg.tags.get("foo") -> tag value
-	msg.tags.deleteKey("foo")
 
   How should full content bytes behave?
     Forget about it. Too complex, unlikely to be useful.

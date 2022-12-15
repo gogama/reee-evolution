@@ -150,20 +150,26 @@ func installAddRuleHook(set *GroupSet, cont *vmContainer) *jsHookContainer {
 	// Make the hook function available in the JavaScript runtime.
 	reeeObject := cont.vm.NewObject()
 	reeeObject.Set("addRules", cont.vm.ToValue(hookFunc))
-	cont.vm.Set("reee", reeeObject)
+	err := cont.vm.Set("reee", reeeObject)
+	if err != nil {
+		// FIXME: Handle this error.
+	}
 	// Return the hook container.
 	return hc
 }
 
 type vmContainer struct {
-	path           string
-	id             int
-	vm             *goja.Runtime
-	mu             sync.Mutex
-	msgProto       *goja.Object
-	loggerProto    *goja.Object
-	addressesProto *goja.Object
-	mailboxProto   *goja.Object
+	path             string
+	id               int
+	vm               *goja.Runtime
+	mu               sync.Mutex
+	msgProto         *goja.Object
+	loggerProto      *goja.Object
+	addressesProto   *goja.Object
+	mailboxProto     *goja.Object
+	headersProto     *goja.Object
+	attachmentsProto *goja.Object
+	tagsProto        *goja.Object
 }
 
 func (cont *vmContainer) acquire(ctx context.Context) error {
@@ -210,8 +216,12 @@ func throwJSException(vm *goja.Runtime, value any) {
 }
 
 // TODO: Move this somewhere appropriate.
-func errUnexpectedType(expected, actual any) error {
+func errUnexpectedThisType(expected, actual any) error {
 	return fmt.Errorf("reeed: expected this to be a %T, but it is a %T", expected, actual)
+}
+
+func errUnexpectedArgType(i int, expected, actual any) error {
+	return fmt.Errorf("reeed: expected argument %d to be a %T, but it is a %T", i, expected, actual)
 }
 
 /**

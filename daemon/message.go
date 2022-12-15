@@ -11,7 +11,6 @@ import (
 type Metadata struct {
 	sampled bool
 	tags    map[string]string
-	// TODO: Will need a thing to track changes.
 }
 
 func NewMetadata(sampled bool, tags map[string]string) Metadata {
@@ -111,7 +110,7 @@ func (rec *RuleEvalRecord) Err() error {
 
 func (rec *RuleEvalRecord) Keys() []string {
 	msg := rec.evalRecord.Message
-	lock := msg.lock
+	lock := &msg.lock
 	lock.RLock()
 	defer lock.RUnlock()
 	keys := make([]string, 0, len(msg.metadata.tags))
@@ -123,7 +122,7 @@ func (rec *RuleEvalRecord) Keys() []string {
 
 func (rec *RuleEvalRecord) GetTag(key string) (value string, hit bool) {
 	msg := rec.evalRecord.Message
-	lock := msg.lock
+	lock := &msg.lock
 	lock.RLock()
 	defer lock.RUnlock()
 	value, hit = msg.metadata.tags[key]
@@ -132,7 +131,7 @@ func (rec *RuleEvalRecord) GetTag(key string) (value string, hit bool) {
 
 func (rec *RuleEvalRecord) SetTag(key, value string) {
 	msg := rec.evalRecord.Message
-	lock := msg.lock
+	lock := &msg.lock
 	lock.Lock()
 	defer lock.Unlock()
 	if msg.metadata.tags == nil {
@@ -144,7 +143,7 @@ func (rec *RuleEvalRecord) SetTag(key, value string) {
 
 func (rec *RuleEvalRecord) DeleteTag(key string) {
 	msg := rec.evalRecord.Message
-	lock := msg.lock
+	lock := &msg.lock
 	lock.Lock()
 	defer lock.Unlock()
 	delete(msg.metadata.tags, key)
