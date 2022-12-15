@@ -355,7 +355,9 @@ func prepareMsg(ctx *cmdContext, cacheKey, storeID string, e *enmime.Envelope, b
 	elapsed := time.Since(start)
 	if ok {
 		ctx.Verbose("found metadata for %s in message store in %s.", storeID, elapsed)
-		return &Message{Envelope: e, fullText: buf, metadata: meta}, nil
+		msg = &Message{Envelope: e, fullText: buf, metadata: meta}
+		ctx.d.Cache.Put(cacheKey, msg, uint64(len(buf)))
+		return msg, nil
 	}
 	ctx.Verbose("did not find metadata for %s in message store in %s.", storeID, elapsed)
 
