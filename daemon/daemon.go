@@ -277,6 +277,8 @@ func handleEval(ctx *cmdContext) error {
 		if err != nil {
 			return err
 		}
+	} else {
+		storeID = toStoreID(msg.Envelope, md5Sum)
 	}
 
 	ger := &EvalRecord{

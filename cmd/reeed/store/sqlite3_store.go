@@ -122,6 +122,7 @@ func (s *SQLite3Store) GetMetadata(storeID string) (daemon.Metadata, bool, error
 
 	var tags map[string]string
 	if tagRows.Next() {
+		tags = make(map[string]string)
 		for {
 			var k, v string
 			err = tagRows.Scan(&k, &v)
@@ -374,7 +375,7 @@ const (
 var (
 	stmtText = [numStmt]string{
 		`SELECT is_sampled FROM message WHERE id = :id`,
-		`SELECT "key", "value" FROM tag WHERE id = :id AND "value" IS NOT NULL`,
+		`SELECT "key", "value" FROM tag WHERE message_id = :id AND "value" IS NOT NULL`,
 		`INSERT INTO message(
                     id, insert_time, is_sampled, send_time,
                     from_address, from_alias, to_address, to_alias, to_list,
