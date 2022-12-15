@@ -7,6 +7,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/jhillyerd/enmime"
+
 	"github.com/dop251/goja"
 	"github.com/gogama/reee-evolution/daemon"
 )
@@ -119,8 +121,12 @@ func jsMessagePrototype(cont *vmContainer) (*goja.Object, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// TODO: Define attachments property.
+	// Define attachments property.
+	err = jsMessagePrototypeDefineProp(cont.vm, proto, "attachments", func(msg *jsMessage) []*enmime.Part {
+		return msg.msg.Envelope.Attachments
+	}, func(attachments []*enmime.Part) (goja.Value, error) {
+		return marshalAttachments(cont.vm, &cont.attachmentProto, attachments)
+	})
 
 	return proto, nil
 }
@@ -318,16 +324,94 @@ type jsMailbox struct {
 	address goja.Value // string
 }
 
-/**
-  How should attachments behave? SHOULD BE MATERIALIZED ARRAY.
-	msg.attachments -> array
-	msg.attachments.length (array length)
-	msg.attachments[0].fileName
-	msg.attachments[0].fileModDate
-	msg.attachments[0].contentType
+type jsAttachment struct {
+	part *enmime.Part
 
-		[Forget about trying to handle actual content bytes/length.]
+	fileName    goja.Value // string
+	fileModDate goja.Value // time.Time
+	contentType goja.Value // string
+}
 
-  How should full content bytes behave?
-    Forget about it. Too complex, unlikely to be useful.
-*/
+func marshalAttachments(vm *goja.Runtime, protoPtr **goja.Object, attachments []*enmime.Part) (goja.Value, error) {
+	a := make([]goja.Value, len(attachments))
+	for i := range attachments {
+		attachment, err := marshalAttachment(vm, protoPtr, attachments[i])
+		if err != nil {
+			return nil, err
+		}
+		a[i] = attachment
+	}
+	return vm.ToValue(a), nil
+}
+
+func marshalAttachment(vm *goja.Runtime, protoPtr **goja.Object, attachment *enmime.Part) (goja.Value, error) {
+	proto := *protoPtr
+	var err error
+	if proto == nil {
+		proto, err = jsAttachmentPrototype(vm)
+		if err != nil {
+			return nil, err
+		}
+		*protoPtr = proto
+	}
+	a := &jsAttachment{
+		part: attachment,
+	}
+	o := vm.ToValue(a).ToObject(vm)
+	err = o.SetPrototype(proto)
+	if err != nil {
+		return nil, err
+	}
+	return o, nil
+}
+
+func jsAttachmentPrototype(vm *goja.Runtime) (*goja.Object, error) {
+	proto := vm.NewObject()
+	err := defineGetterProperty(vm, proto, "fileName", jsAttachmentFileName)
+	if err != nil {
+		return nil, err
+	}
+	err = defineGetterProperty(vm, proto, "fileModDate", jsAttachmentFileModDate)
+	if err != nil {
+		return nil, err
+	}
+	err = defineGetterProperty(vm, proto, "contentType", jsAttachmentContentType)
+	if err != nil {
+		return nil, err
+	}
+	return proto, nil
+}
+
+func jsAttachmentFileName(vm *goja.Runtime, this any) (goja.Value, error) {
+	if this, ok := this.(*jsAttachment); ok {
+		if this.fileName == nil {
+			this.fileName = vm.ToValue(this.part.FileName)
+		}
+		return this.fileName, nil
+	}
+	return nil, errUnexpectedThisType(&jsAttachment{}, this)
+}
+
+func jsAttachmentFileModDate(vm *goja.Runtime, this any) (goja.Value, error) {
+	if this, ok := this.(*jsAttachment); ok {
+		if this.fileModDate == nil {
+			fileModDate, err := marshalDate(vm, this.part.FileModDate)
+			if err != nil {
+				return nil, err
+			}
+			this.fileModDate = fileModDate
+		}
+		return this.fileModDate, nil
+	}
+	return nil, errUnexpectedThisType(&jsAttachment{}, this)
+}
+
+func jsAttachmentContentType(vm *goja.Runtime, this any) (goja.Value, error) {
+	if this, ok := this.(*jsAttachment); ok {
+		if this.contentType == nil {
+			this.contentType = vm.ToValue(this.part.ContentType)
+		}
+		return this.contentType, nil
+	}
+	return nil, errUnexpectedThisType(&jsAttachment{}, this)
+}

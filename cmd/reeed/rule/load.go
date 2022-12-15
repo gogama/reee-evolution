@@ -159,17 +159,17 @@ func installAddRuleHook(set *GroupSet, cont *vmContainer) *jsHookContainer {
 }
 
 type vmContainer struct {
-	path             string
-	id               int
-	vm               *goja.Runtime
-	mu               sync.Mutex
-	msgProto         *goja.Object
-	loggerProto      *goja.Object
-	addressesProto   *goja.Object
-	mailboxProto     *goja.Object
-	headersProto     *goja.Object
-	attachmentsProto *goja.Object
-	tagsProto        *goja.Object
+	path            string
+	id              int
+	vm              *goja.Runtime
+	mu              sync.Mutex
+	msgProto        *goja.Object
+	loggerProto     *goja.Object
+	addressesProto  *goja.Object
+	mailboxProto    *goja.Object
+	headersProto    *goja.Object
+	attachmentProto *goja.Object
+	tagsProto       *goja.Object
 }
 
 func (cont *vmContainer) acquire(ctx context.Context) error {
