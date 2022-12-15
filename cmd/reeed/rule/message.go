@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/mail"
 	"reflect"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -272,9 +273,23 @@ func marshalMailbox(cont *vmContainer, mailbox *mail.Address) (goja.Value, error
 		}
 		cont.mailboxProto = proto
 	}
+	name := goja.Undefined()
+	if mailbox.Name != "" {
+		name = cont.vm.ToValue(mailbox.Name)
+	}
+	address, localPart, domain := goja.Undefined(), goja.Undefined(), goja.Undefined()
+	if mailbox.Address != "" {
+		address = cont.vm.ToValue(mailbox.Address)
+		if i := strings.IndexByte(mailbox.Address, '@'); i >= 0 {
+			localPart = cont.vm.ToValue(mailbox.Address[0:i])
+			domain = cont.vm.ToValue(mailbox.Address[i+1:])
+		}
+	}
 	m := &jsMailbox{
-		name:    cont.vm.ToValue(mailbox.Name),
-		address: cont.vm.ToValue(mailbox.Address),
+		name:      name,
+		address:   address,
+		localPart: localPart,
+		domain:    domain,
 	}
 	o := cont.vm.ToValue(m).ToObject(cont.vm)
 	err := o.SetPrototype(cont.mailboxProto)
@@ -304,6 +319,24 @@ func jsMailboxPrototype(vm *goja.Runtime) (*goja.Object, error) {
 	if err != nil {
 		return nil, err
 	}
+	err = defineGetterProperty(vm, proto, "localPart", func(_ *goja.Runtime, this any) (goja.Value, error) {
+		if this, ok := this.(*jsMailbox); ok {
+			return this.localPart, nil
+		}
+		return nil, errUnexpectedThisType(&jsMailbox{}, this)
+	})
+	if err != nil {
+		return nil, err
+	}
+	err = defineGetterProperty(vm, proto, "domain", func(_ *goja.Runtime, this any) (goja.Value, error) {
+		if this, ok := this.(*jsMailbox); ok {
+			return this.domain, nil
+		}
+		return nil, errUnexpectedThisType(&jsMailbox{}, this)
+	})
+	if err != nil {
+		return nil, err
+	}
 	return proto, nil
 }
 
@@ -320,8 +353,10 @@ func defineGetterProperty(vm *goja.Runtime, proto *goja.Object, propName string,
 }
 
 type jsMailbox struct {
-	name    goja.Value // string
-	address goja.Value // string
+	name      goja.Value // string
+	address   goja.Value // string
+	localPart goja.Value // string (local-part of address)
+	domain    goja.Value // string (domain of address)
 }
 
 type jsAttachment struct {
