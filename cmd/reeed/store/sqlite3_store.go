@@ -314,9 +314,9 @@ CREATE TABLE IF NOT EXISTS tag(
 	create_time 	TEXT 	NOT NULL,
 	create_group 	TEXT 	NOT NULL,
 	create_rule     TEXT    NOT NULL, 
-	update_time 	TEXT    NOT NULL,
-	update_group    TEXT    NOT NULL,
-	update_rule     TEXT    NOT NULL,
+	update_time 	TEXT,
+	update_group    TEXT,
+	update_rule     TEXT,
 
 	FOREIGN KEY(message_id) REFERENCES message(id) 
 );

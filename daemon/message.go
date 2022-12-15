@@ -135,6 +135,9 @@ func (rec *RuleEvalRecord) SetTag(key, value string) {
 	lock := msg.lock
 	lock.Lock()
 	defer lock.Unlock()
+	if msg.metadata.tags == nil {
+		msg.metadata.tags = make(map[string]string)
+	}
 	msg.metadata.tags[key] = value
 	rec.tagChanges = append(rec.tagChanges, TagChange{time.Now(), key, &value})
 }
