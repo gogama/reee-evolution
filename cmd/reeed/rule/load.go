@@ -165,7 +165,6 @@ type vmContainer struct {
 	mu                    sync.Mutex
 	msgProto              *goja.Object
 	loggerProto           *goja.Object
-	addressesProto        *goja.Object
 	mailboxProto          *goja.Object
 	headersProto          *goja.Object
 	attachmentProto       *goja.Object

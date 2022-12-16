@@ -219,13 +219,6 @@ func jsMessagePrototypeDefineProp[T any](vm *goja.Runtime, proto *goja.Object, p
 }
 
 func marshalAddresses(cont *vmContainer, addresses string) (goja.Value, error) {
-	if cont.addressesProto == nil {
-		proto, err := jsAddressesPrototype(cont.vm)
-		if err != nil {
-			return nil, err
-		}
-		cont.addressesProto = proto
-	}
 	if addresses == "" {
 		return goja.Null(), nil
 	}
@@ -243,44 +236,8 @@ func marshalAddresses(cont *vmContainer, addresses string) (goja.Value, error) {
 			return nil, err
 		}
 	}
-	as := &jsAddresses{
-		header:    cont.vm.ToValue(addresses),
-		mailboxes: cont.vm.ToValue(a),
-	}
-	o := cont.vm.ToValue(as).ToObject(cont.vm)
-	err = o.SetPrototype(cont.addressesProto)
-	if err != nil {
-		return nil, err
-	}
+	o := cont.vm.ToValue(a)
 	return o, nil
-}
-
-func jsAddressesPrototype(vm *goja.Runtime) (*goja.Object, error) {
-	proto := vm.NewObject()
-	err := defineGetterProperty(vm, proto, "header", func(_ *goja.Runtime, this any) (goja.Value, error) {
-		if this, ok := this.(*jsAddresses); ok {
-			return this.header, nil
-		}
-		return nil, errUnexpectedThisType(&jsAddresses{}, this)
-	})
-	if err != nil {
-		return nil, err
-	}
-	err = defineGetterProperty(vm, proto, "mailboxes", func(_ *goja.Runtime, this any) (goja.Value, error) {
-		if this, ok := this.(*jsAddresses); ok {
-			return this.mailboxes, nil
-		}
-		return nil, errUnexpectedThisType(&jsAddresses{}, this)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return proto, nil
-}
-
-type jsAddresses struct {
-	header    goja.Value
-	mailboxes goja.Value
 }
 
 func marshalMailbox(cont *vmContainer, mailbox *mail.Address) (goja.Value, error) {
