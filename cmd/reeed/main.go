@@ -253,22 +253,3 @@ func (pct *percent) UnmarshalText(b []byte) error {
 	*pct = percent(f / 100.0)
 	return nil
 }
-
-// todo: delete
-type tempDummyRuleFunc func(ctx context.Context, logger log.Printer, msg *daemon.Message, _ daemon.Tagger) (stop bool, err error)
-
-// todo: delete
-type tempDummyRule struct {
-	name string
-	f    tempDummyRuleFunc
-}
-
-// todo: delete
-func (todoDelete *tempDummyRule) String() string {
-	return todoDelete.name
-}
-
-// todo: delete
-func (todoDelete *tempDummyRule) Eval(ctx context.Context, logger log.Printer, msg *daemon.Message, tagger daemon.Tagger) (stop bool, err error) {
-	return todoDelete.f(ctx, logger, msg, tagger)
-}
