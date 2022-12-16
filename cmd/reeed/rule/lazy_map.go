@@ -11,6 +11,11 @@ type immutableMap interface {
 	get(key string) (string, bool)
 }
 
+type multiMap interface {
+	immutableMap
+	getAll(key string) ([]string, bool)
+}
+
 type mutableMap interface {
 	immutableMap
 	set(key, value string)
@@ -18,24 +23,26 @@ type mutableMap interface {
 }
 
 type jsLazyMap struct {
-	im   immutableMap
-	mm   mutableMap
-	keys goja.Value
+	i     immutableMap
+	multi multiMap
+	mut   mutableMap
+	keys  goja.Value
 }
 
-func marshalLazyMap(vm *goja.Runtime, protoPtr **goja.Object, im immutableMap, mm mutableMap) (goja.Value, error) {
+func marshalLazyMap(vm *goja.Runtime, protoPtr **goja.Object, i immutableMap, multi multiMap, mut mutableMap) (goja.Value, error) {
 	proto := *protoPtr
 	var err error
 	if proto == nil {
-		proto, err = jsLazyMapPrototype(vm, mm != nil)
+		proto, err = jsLazyMapPrototype(vm, multi != nil, mut != nil)
 		if err != nil {
 			return nil, err
 		}
 		*protoPtr = proto
 	}
 	lm := &jsLazyMap{
-		im: im,
-		mm: mm,
+		i:     i,
+		multi: multi,
+		mut:   mut,
 	}
 	o := vm.ToValue(lm).ToObject(vm)
 	err = o.SetPrototype(proto)
@@ -45,7 +52,7 @@ func marshalLazyMap(vm *goja.Runtime, protoPtr **goja.Object, im immutableMap, m
 	return o, nil
 }
 
-func jsLazyMapPrototype(vm *goja.Runtime, mutable bool) (*goja.Object, error) {
+func jsLazyMapPrototype(vm *goja.Runtime, multi, mutable bool) (*goja.Object, error) {
 	proto := vm.NewObject()
 	err := defineGetterProperty(vm, proto, "keys", jsLazyMapKeys)
 	if err != nil {
@@ -54,6 +61,12 @@ func jsLazyMapPrototype(vm *goja.Runtime, mutable bool) (*goja.Object, error) {
 	err = proto.Set("get", vm.ToValue(jsLazyMapGet))
 	if err != nil {
 		return nil, err
+	}
+	if multi {
+		err = proto.Set("getAll", vm.ToValue(jsLazyMapGetAll))
+		if err != nil {
+			return nil, err
+		}
 	}
 	if !mutable {
 		return proto, nil
@@ -72,8 +85,8 @@ func jsLazyMapPrototype(vm *goja.Runtime, mutable bool) (*goja.Object, error) {
 func jsLazyMapKeys(vm *goja.Runtime, this any) (goja.Value, error) {
 	if this, ok := this.(*jsLazyMap); ok {
 		if this.keys == nil {
-			keys := vm.ToValue(this.im.keys())
-			if this.mm == nil {
+			keys := vm.ToValue(this.i.keys())
+			if this.mut == nil {
 				this.keys = keys
 			}
 			return keys, nil
@@ -97,7 +110,27 @@ func jsLazyMapGet(call goja.FunctionCall, vm *goja.Runtime) goja.Value {
 	var this *jsLazyMap
 	if this, ok = this_.(*jsLazyMap); !ok {
 		throwJSException(vm, errUnexpectedThisType(&jsLazyMap{}, this_))
-	} else if value, ok := this.im.get(key); ok {
+	} else if value, ok := this.i.get(key); ok {
+		return vm.ToValue(value)
+	}
+	return goja.Undefined()
+}
+
+func jsLazyMapGetAll(call goja.FunctionCall, vm *goja.Runtime) goja.Value {
+	if len(call.Arguments) != 1 {
+		throwJSException(vm, "reeed: getAll() requires exactly one argument")
+	}
+	key_ := call.Arguments[0].Export()
+	var key string
+	var ok bool
+	if key, ok = key_.(string); !ok {
+		throwJSException(vm, errUnexpectedArgType(0, "", key_))
+	}
+	this_ := call.This.Export()
+	var this *jsLazyMap
+	if this, ok = this_.(*jsLazyMap); !ok {
+		throwJSException(vm, errUnexpectedThisType(&jsLazyMap{}, this_))
+	} else if value, ok := this.multi.getAll(key); ok {
 		return vm.ToValue(value)
 	}
 	return goja.Undefined()
@@ -123,7 +156,7 @@ func jsLazyMapSet(call goja.FunctionCall, vm *goja.Runtime) goja.Value {
 	if this, ok = this_.(*jsLazyMap); !ok {
 		throwJSException(vm, errUnexpectedThisType(&jsLazyMap{}, this_))
 	}
-	this.mm.set(key, value)
+	this.mut.set(key, value)
 	return call.Arguments[1]
 }
 
@@ -142,7 +175,7 @@ func jsLazyMapDeleteKey(call goja.FunctionCall, vm *goja.Runtime) goja.Value {
 	if this, ok = this_.(*jsLazyMap); !ok {
 		throwJSException(vm, errUnexpectedThisType(&jsLazyMap{}, this_))
 	}
-	this.mm.deleteKey(key)
+	this.mut.deleteKey(key)
 	return goja.Undefined()
 }
 
@@ -155,8 +188,19 @@ func (hm headersMap) keys() []string {
 }
 
 func (hm headersMap) get(key string) (string, bool) {
-	value := hm.GetHeader(key)
-	return value, value != ""
+	value := hm.GetHeaderValues(key)
+	if len(value) == 0 {
+		return "", false
+	}
+	return value[0], true
+}
+
+func (hm headersMap) getAll(key string) ([]string, bool) {
+	all := hm.GetHeaderValues(key)
+	if len(all) == 0 {
+		return nil, false
+	}
+	return all, true
 }
 
 type tagsMap struct {

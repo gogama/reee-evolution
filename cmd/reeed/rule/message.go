@@ -8,10 +8,10 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/jhillyerd/enmime"
-
+	ics "github.com/arran4/golang-ical"
 	"github.com/dop251/goja"
 	"github.com/gogama/reee-evolution/daemon"
+	"github.com/jhillyerd/enmime"
 )
 
 func marshalMessage(cont *vmContainer, msg *daemon.Message, tagger daemon.Tagger) (goja.Value, error) {
@@ -106,10 +106,10 @@ func jsMessagePrototype(cont *vmContainer) (*goja.Object, error) {
 		return nil, err
 	}
 	// Define lazy map map properties.
-	err = jsMessagePrototypeDefineProp(cont.vm, proto, "headers", func(msg *jsMessage) immutableMap {
+	err = jsMessagePrototypeDefineProp(cont.vm, proto, "headers", func(msg *jsMessage) headersMap {
 		return headersMap{Envelope: msg.msg.Envelope}
-	}, func(im immutableMap) (goja.Value, error) {
-		return marshalLazyMap(cont.vm, &cont.headersProto, im, nil)
+	}, func(hm headersMap) (goja.Value, error) {
+		return marshalLazyMap(cont.vm, &cont.headersProto, hm, hm, nil)
 	})
 	if err != nil {
 		return nil, err
@@ -117,7 +117,7 @@ func jsMessagePrototype(cont *vmContainer) (*goja.Object, error) {
 	err = jsMessagePrototypeDefineProp(cont.vm, proto, "tags", func(msg *jsMessage) mutableMap {
 		return tagsMap{Tagger: msg.tagger}
 	}, func(mm mutableMap) (goja.Value, error) {
-		return marshalLazyMap(cont.vm, &cont.tagsProto, mm, mm)
+		return marshalLazyMap(cont.vm, &cont.tagsProto, mm, nil, mm)
 	})
 	if err != nil {
 		return nil, err
@@ -127,6 +127,18 @@ func jsMessagePrototype(cont *vmContainer) (*goja.Object, error) {
 		return msg.msg.Envelope.Attachments
 	}, func(attachments []*enmime.Part) (goja.Value, error) {
 		return marshalAttachments(cont.vm, &cont.attachmentProto, attachments)
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Define the calendar property.
+	err = jsMessagePrototypeDefineProp(cont.vm, proto, "calendar", func(msg *jsMessage) *ics.Calendar {
+		return parseCalendar(msg.msg.Envelope.OtherParts, msg.msg.Envelope.Inlines)
+	}, func(calendar *ics.Calendar) (goja.Value, error) {
+		if calendar == nil {
+			return goja.Null(), nil
+		}
+		return marshalCalendar(cont, calendar)
 	})
 
 	return proto, nil
@@ -159,6 +171,9 @@ type jsMessage struct {
 
 	// Cached materialized array of attachments.
 	attachments goja.Value
+
+	// Cached materialized view of iCalendar part, if available.
+	calendar goja.Value
 }
 
 var jsMessageType = reflect.TypeOf(jsMessage{})
@@ -210,6 +225,9 @@ func marshalAddresses(cont *vmContainer, addresses string) (goja.Value, error) {
 			return nil, err
 		}
 		cont.addressesProto = proto
+	}
+	if addresses == "" {
+		return goja.Null(), nil
 	}
 	list, err := mail.ParseAddressList(addresses)
 	if err != nil {

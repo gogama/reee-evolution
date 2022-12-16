@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/alexflint/go-arg v1.4.3
+	github.com/arran4/golang-ical v0.0.0-20221122102835-109346913e54
 	github.com/dop251/goja v0.0.0-20221118162653-d4bf6fde1b86
 	github.com/gofrs/uuid v4.3.1+incompatible
 	github.com/gogama/policy-lru v0.0.0-20221123213906-b3cf3295d8c5
