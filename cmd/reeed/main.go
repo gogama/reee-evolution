@@ -32,6 +32,7 @@ type args struct {
 	NoDB      bool    `arg:"--no-db" help:"don't log events to database"`
 	RulePath  string  `arg:"--rules,env:REEE_RULES help:path to directory containing rule scripts"`
 	SamplePct percent `arg:"-s,--sample" help:"sample percentage, e.g. 25%" default:"1%"`
+	RandSeed  *int64  `arg:"-S,--seed" help:"seed for Math.random() number generator"`
 	Verbose   bool    `arg:"-v,--verbose" help:"enable verbose logging"`
 }
 
@@ -193,7 +194,13 @@ func loadRuleGroups(ctx context.Context, logger log.Printer, a *args) (map[strin
 		if d.IsDir() || !strings.HasSuffix(path, ".js") {
 			return nil
 		}
-		return groups.Load(ctx, logger, path)
+		var randSeed int64
+		if a.RandSeed == nil {
+			randSeed = time.Now().Unix()
+		} else {
+			randSeed = *a.RandSeed
+		}
+		return groups.Load(ctx, logger, path, randSeed)
 	})
 	if err != nil {
 		return nil, err

@@ -3,6 +3,7 @@ package rule
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
 	"runtime/debug"
 	"sort"
@@ -18,7 +19,7 @@ type GroupSet struct {
 	vms    []*vmContainer
 }
 
-func (set *GroupSet) Load(ctx context.Context, logger log.Printer, path string) error {
+func (set *GroupSet) Load(ctx context.Context, logger log.Printer, path string, randSeed int64) error {
 	log.Verbose(logger, "loading groups from %s...", path)
 
 	text, err := loadFileText(ctx, path)
@@ -32,6 +33,10 @@ func (set *GroupSet) Load(ctx context.Context, logger log.Printer, path string) 
 	}
 
 	vm := goja.New()
+	if randSeed > 0 {
+		r := rand.New(rand.NewSource(randSeed))
+		vm.SetRandSource(r.Float64)
+	}
 	vm.SetFieldNameMapper(goja.UncapFieldNameMapper())
 	cont := &vmContainer{
 		path: path,
