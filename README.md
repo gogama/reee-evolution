@@ -6,7 +6,8 @@ DOCS COMING SOON.
 HIGH priority TODOS:
     - Truncate verbose logs at newline to prevent protocol error.
     - Replace goja.Undefined with goja.Null in cases where there is a
-      "defined" property that just has no known value.
+      "defined" property that just has no known value. Try to follow the
+      expected ECMAScript convention with these values.
     - Create a mechanism to log non-fatal parsing and marshaling errors
       from within the JS integration code.
     - Build the vmContainer acquire/release code.
