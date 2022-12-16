@@ -217,12 +217,13 @@ func handleEval(ctx *cmdContext) error {
 
 	var rules []Rule
 	var ok bool
+	var deferredErr error
 
 	if rules, ok = ctx.d.Groups[g]; !ok {
-		return fmt.Errorf("group not found: %s", g)
+		deferredErr = fmt.Errorf("group not found: %s", g)
 	}
 
-	if r != "" {
+	if deferredErr != nil && r != "" {
 		for i := range rules {
 			if r == rules[i].String() {
 				rules = []Rule{rules[i]}
@@ -231,7 +232,7 @@ func handleEval(ctx *cmdContext) error {
 			}
 		}
 		if r == "" {
-			// TODO: error rule not found
+			deferredErr = fmt.Errorf("rule not found: %s [group: %s]", r, g)
 		}
 	}
 
@@ -246,15 +247,17 @@ func handleEval(ctx *cmdContext) error {
 		m += o
 		if err == io.EOF {
 			ctx.isEOF = true
-		} else if err != nil {
-			return err
+		} else if deferredErr == nil {
+			deferredErr = err
 		}
 	}
 	md5Sum := fmt.Sprintf("%x", md5.Sum(buf))
 	elapsed := time.Since(start)
 	ctx.Verbose("read %d bytes of input with md5sum %s in %s.", m, md5Sum, elapsed)
 
-	if m < n {
+	if deferredErr != nil {
+		return deferredErr
+	} else if m < n {
 		return fmt.Errorf("insufficient input: received only %d/%d expected bytes", m, n)
 	}
 
