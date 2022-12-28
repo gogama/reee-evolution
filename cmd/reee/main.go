@@ -131,9 +131,6 @@ func executeCommand(ins io.Reader, outs, errs io.Writer, sub subCommand, a *args
 	}
 	log.Verbose(logger, "command ID: %s", cmdID)
 
-	// TODO: We will want to put wire logging right here, maybe by
-	//       wrapping the conn.
-
 	// Buffer the connection.
 	r := bufio.NewReader(conn)
 	w := bufio.NewWriter(conn)
