@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -13,10 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gogama/reee-evolution/cmd/reeed/rule"
-
 	"github.com/alexflint/go-arg"
 	"github.com/gogama/reee-evolution/cmd/reeed/cache"
+	"github.com/gogama/reee-evolution/cmd/reeed/rule"
 	"github.com/gogama/reee-evolution/cmd/reeed/store"
 	"github.com/gogama/reee-evolution/cmd/reeeuse"
 	"github.com/gogama/reee-evolution/daemon"
@@ -28,12 +28,13 @@ import (
 type args struct {
 	Address   string  `arg:"-a,--addr,env:REEE_ADDR" help:"listen on address"`
 	Network   string  `arg:"-n,--net,env:REEE_NET" help:"listen on network"`
-	DBFile    string  `arg:"--db,env:REEE_DB" help:"path to email events database"`
+	DBFile    string  `arg:"--db,env:REEE_DB" help:"path to email events database" placeholder:"FILE"`
 	NoDB      bool    `arg:"--no-db" help:"don't log events to database"`
-	RulePath  string  `arg:"--rules,env:REEE_RULES help:path to directory containing rule scripts"`
+	RulePath  string  `arg:"--rules,env:REEE_RULES" help:"path to rule script directory" placeholder:"DIR"`
 	SamplePct percent `arg:"-s,--sample" help:"sample percentage, e.g. 25%" default:"1%"`
 	RandSeed  *int64  `arg:"-S,--seed" help:"seed for Math.random() number generator"`
-	Verbose   bool    `arg:"-v,--verbose" help:"enable verbose logging"`
+	Quiet     bool    `arg:"-q,--quiet" help:"log only high-importance messages"`
+	Verbose   bool    `arg:"-v,--verbose" help:"log all available messages"`
 }
 
 func (a *args) Version() string {
@@ -45,6 +46,9 @@ type exitCoder interface {
 }
 
 func main() {
+	// Capture earliest known start time.
+	start := time.Now()
+
 	// Configure the command line interface.
 	network, address := protocol.DefaultNetAddr()
 	a := args{
@@ -63,7 +67,7 @@ func main() {
 	arg.MustParse(&a)
 
 	// Run the daemon program.
-	err := runDaemon(context.Background(), os.Stderr, &a)
+	err := runDaemon(context.Background(), os.Stderr, start, &a)
 	if err != nil {
 		msg := err.Error()
 		if strings.HasSuffix(msg, "\n") {
@@ -80,11 +84,15 @@ func main() {
 	}
 }
 
-func runDaemon(parent context.Context, w io.Writer, a *args) error {
+func runDaemon(parent context.Context, w io.Writer, start time.Time, a *args) error {
 	// Initialize logging.
 	lvl := log.NormalLevel
-	if a.Verbose {
+	if a.Verbose && a.Quiet {
+		return errors.New("cannot be both quiet and verbose")
+	} else if a.Verbose {
 		lvl = log.VerboseLevel
+	} else if a.Quiet {
+		lvl = log.TaciturnLevel
 	}
 	logger := log.WithWriter(lvl, w)
 
@@ -105,7 +113,7 @@ func runDaemon(parent context.Context, w io.Writer, a *args) error {
 	if a.NoDB {
 		s = &store.NullStore{}
 	} else {
-		log.Verbose(logger, "opening message store [%s]...", a.DBFile)
+		log.Normal(logger, "opening message store... [path: %s]", a.DBFile)
 		if s, err = store.NewSQLite3(signalCtx, a.DBFile); err != nil {
 			return err
 		}
@@ -135,7 +143,7 @@ func runDaemon(parent context.Context, w io.Writer, a *args) error {
 		_ = listener.Close()
 		return nil
 	}
-	log.Verbose(logger, "listening... (network: %s, address: %s)", a.Network, a.Address)
+	log.Normal(logger, "listening...             [network: %s, address: %s]", a.Network, a.Address)
 
 	// Start the daemon.
 	d := daemon.Daemon{
@@ -156,6 +164,9 @@ func runDaemon(parent context.Context, w io.Writer, a *args) error {
 		}
 	}()
 
+	// Indicate successful startup.
+	elapsed := time.Since(start)
+	log.Normal(logger, "started.                 [%s]", elapsed)
 	// Wait for a terminating signal.
 	<-signalCtx.Done()
 
@@ -165,14 +176,14 @@ func runDaemon(parent context.Context, w io.Writer, a *args) error {
 	}
 
 	// Allocate a short context for cleanup.
-	log.Verbose(logger, "stopping...")
+	log.Normal(logger, "stopping...")
 	cleanupCtx, cancel := context.WithTimeout(parent, 200*time.Millisecond)
 
 	// Stop the daemon.
 	err = d.Stop(cleanupCtx)
 	cancel()
 	if err == nil {
-		log.Verbose(logger, "stopped.")
+		log.Normal(logger, "stopped.")
 	}
 
 	// TODO: Clean up the Unix domain socket file if it exists.
@@ -181,6 +192,16 @@ func runDaemon(parent context.Context, w io.Writer, a *args) error {
 }
 
 func loadRuleGroups(ctx context.Context, logger log.Printer, a *args) (map[string][]daemon.Rule, error) {
+	var seedLog string
+	if a.RandSeed == nil {
+		seedLog = "<file load time>"
+	} else if *a.RandSeed == 0 {
+		seedLog = "<default>"
+	} else {
+		seedLog = strconv.FormatInt(*a.RandSeed, 10)
+	}
+	log.Normal(logger, "loading rules...         [path: %s, seed: %s]", a.RulePath, seedLog)
+
 	if info, err := os.Lstat(a.RulePath); err != nil {
 		// TODO: Log error and fail out.
 	} else if !info.IsDir() {

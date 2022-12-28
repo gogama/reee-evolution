@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/dop251/goja"
 	"github.com/gogama/reee-evolution/daemon"
@@ -20,7 +21,7 @@ type GroupSet struct {
 }
 
 func (set *GroupSet) Load(ctx context.Context, logger log.Printer, path string, randSeed int64) error {
-	log.Verbose(logger, "loading groups from %s...", path)
+	start := time.Now()
 
 	text, err := loadFileText(ctx, path)
 	if err != nil {
@@ -49,10 +50,12 @@ func (set *GroupSet) Load(ctx context.Context, logger log.Printer, path string, 
 	// TODO: Include context.
 	_, err = vm.RunProgram(program)
 	if err != nil {
+		// TODO: Wrap error messae to include file path.
 		return err
 	}
 
-	log.Verbose(logger, "loaded %d groups and %d rules from %s.", len(hc.groups), hc.numRules, path)
+	elapsed := time.Since(start)
+	log.Verbose(logger, "loaded %d groups and %d rules from %s in %s.", len(hc.groups), hc.numRules, path, elapsed)
 	return nil
 }
 
