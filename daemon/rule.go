@@ -16,5 +16,5 @@ type Tagger interface {
 
 type Rule interface {
 	fmt.Stringer
-	Eval(ctx context.Context, logger log.Printer, msg *Message, tagger Tagger) (stop bool, err error)
+	Eval(ctx context.Context, logger log.Printer, msg *Message, tagger Tagger) (match bool, err error)
 }

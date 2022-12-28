@@ -140,7 +140,7 @@ func (d *Daemon) handle(connID uint64, conn net.Conn) {
 	case protocol.ListCommandType:
 		data, err = handleList(&ctx)
 	case protocol.EvalCommandType:
-		err = handleEval(&ctx)
+		data, err = handleEval(&ctx)
 	default:
 		panic(fmt.Sprintf("daemon: unhandled command type: %d", cmd.Type))
 	}
@@ -196,19 +196,19 @@ func handleList(ctx *cmdContext) ([]byte, error) {
 
 const evalErrPrefix = "args format must be <len> <group> [<rule>] but "
 
-func handleEval(ctx *cmdContext) error {
+func handleEval(ctx *cmdContext) ([]byte, error) {
 	if ctx.args == "" {
-		return errors.New(evalErrPrefix + "args is empty")
+		return nil, errors.New(evalErrPrefix + "args is empty")
 	}
 
 	N, rem, found := strings.Cut(ctx.args, " ")
 	n, err := strconv.Atoi(N)
 	if err != nil || n < 0 {
-		return fmt.Errorf(evalErrPrefix+"first element is %q", N)
+		return nil, fmt.Errorf(evalErrPrefix+"first element is %q", N)
 	}
 
 	if !found {
-		return errors.New(evalErrPrefix + "args does not contain <group>")
+		return nil, errors.New(evalErrPrefix + "args does not contain <group>")
 	}
 	g, r, found := strings.Cut(rem, " ")
 	if !found {
@@ -256,9 +256,9 @@ func handleEval(ctx *cmdContext) error {
 	ctx.Verbose("read %d bytes of input with md5sum %s in %s.", m, md5Sum, elapsed)
 
 	if deferredErr != nil {
-		return deferredErr
+		return nil, deferredErr
 	} else if m < n {
-		return fmt.Errorf("insufficient input: received only %d/%d expected bytes", m, n)
+		return nil, fmt.Errorf("insufficient input: received only %d/%d expected bytes", m, n)
 	}
 
 	msg := getCachedMsg(ctx, md5Sum)
@@ -269,7 +269,7 @@ func handleEval(ctx *cmdContext) error {
 		var e *enmime.Envelope
 		e, err = enmime.NewParser().ReadEnvelope(bytes.NewReader(buf))
 		if err != nil {
-			return fmt.Errorf("invalid message: %s", err.Error())
+			return nil, fmt.Errorf("invalid message: %s", err.Error())
 		}
 		storeID = toStoreID(e, md5Sum)
 		elapsed = time.Since(start)
@@ -278,7 +278,7 @@ func handleEval(ctx *cmdContext) error {
 		// Try to retrieve metadata from the store.
 		msg, err = prepareMsg(ctx, md5Sum, storeID, e, buf)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		storeID = toStoreID(msg.Envelope, md5Sum)
@@ -291,39 +291,46 @@ func handleEval(ctx *cmdContext) error {
 		rules:     make([]*RuleEvalRecord, 0, len(rules)),
 	}
 
-	var stop bool
+	var i int
+	var data string
 	var ruleEvalErr error
 	start = time.Now()
-	for i := 0; i < len(rules) && !stop; i++ {
+	for ; i < len(rules); i++ {
 		rer := &RuleEvalRecord{
 			evalRecord: ger,
 			startTime:  time.Now(),
 			rule:       rules[i].String(),
 		}
-		stop, ruleEvalErr = rules[i].Eval(ctx.ctx, ctx, msg, rer)
+		var match bool
+		match, ruleEvalErr = rules[i].Eval(ctx.ctx, ctx, msg, rer)
 		rer.endTime = time.Now()
-		rer.stop = stop
+		rer.match = match
 		rer.err = ruleEvalErr
 		ger.rules = append(ger.rules, rer)
 		if ruleEvalErr != nil {
 			ctx.Verbose("rule %s ended early with error: %s", rules[i], ruleEvalErr)
 			break
+		} else if match {
+			ctx.Verbose("rule %s matched.", rules[i])
+			data = "match:" + rules[i].String()
+			break
 		}
 	}
 	ger.endTime = time.Now()
 	elapsed = time.Since(start)
-	ctx.Verbose("evaluated %d rules in %s.", len(ger.rules), elapsed)
+	ctx.Verbose("evaluated %d of %d rules in %s.", i, len(ger.rules), elapsed)
 
 	start = time.Now()
 	err = ctx.d.Store.RecordEval(storeID, ger)
 	if ruleEvalErr != nil {
-		return ruleEvalErr
+		return nil, ruleEvalErr
 	} else if err != nil {
-		return err
+		return nil, err
 	}
 	elapsed = time.Since(start)
 	ctx.Verbose("recorded evaluation record in %s.", elapsed)
-	return nil
+
+	return []byte(data), nil
 }
 
 func getCachedMsg(ctx *cmdContext, cacheKey string) *Message {

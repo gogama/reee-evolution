@@ -90,8 +90,13 @@ func (cmd *evalCommand) Exec(cmdID string, logger log.Printer, ins io.Reader, _ 
 
 	switch rst.Type {
 	case protocol.SuccessResultType:
-		if len(rst.Data) > 0 {
-			log.Verbose(logger, "received %d bytes of unexpected data in success result", len(rst.Data))
+		if len(rst.Data) == 0 {
+			return errNoMatch(0)
+		} else if len(rst.Data) >= 6 && bytes.Equal(rst.Data[0:6], []byte("match:")) {
+			log.Verbose(logger, "matched rule %s.", rst.Data[6:])
+			return nil
+		} else {
+			log.Verbose(logger, "received %d bytes of unexpected data in success result: %q", len(rst.Data), rst.Data)
 			return errors.New("unexpected data in success result")
 		}
 		return nil
@@ -118,4 +123,14 @@ func validateRuleOrGroupName(category, name string) error {
 		}
 	}
 	return nil
+}
+
+type errNoMatch int
+
+func (err errNoMatch) Error() string {
+	return "no rule matched"
+}
+
+func (err errNoMatch) Code() int {
+	return 65 // Special exit code indicating no rule matched.
 }

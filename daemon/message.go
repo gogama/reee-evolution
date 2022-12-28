@@ -83,7 +83,7 @@ type RuleEvalRecord struct {
 	rule       string
 	startTime  time.Time
 	endTime    time.Time
-	stop       bool
+	match      bool
 	err        error
 	tagChanges []TagChange
 }
@@ -100,8 +100,8 @@ func (rec *RuleEvalRecord) EndTime() time.Time {
 	return rec.endTime
 }
 
-func (rec *RuleEvalRecord) Stop() bool {
-	return rec.stop
+func (rec *RuleEvalRecord) Match() bool {
+	return rec.match
 }
 
 func (rec *RuleEvalRecord) Err() error {

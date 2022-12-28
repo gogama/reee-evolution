@@ -216,15 +216,15 @@ func (s *SQLite3Store) RecordEval(storeID string, r *daemon.EvalRecord) error {
 	}()
 
 	// Get the final result of the group evaluation if there was one.
-	var stop *bool
+	var match *bool
 	var errStr *string
 	m := r.RuleLen()
 	if m > 0 {
 		rr := r.Rule(m - 1)
-		boolValue := rr.Stop()
-		stop = &boolValue
+		boolValue := rr.Match()
+		match = &boolValue
 		if lastRuleErr := rr.Err(); lastRuleErr != nil {
-			stop = nil
+			match = nil
 			strValue := lastRuleErr.Error()
 			errStr = &strValue
 		}
@@ -234,7 +234,7 @@ func (s *SQLite3Store) RecordEval(storeID string, r *daemon.EvalRecord) error {
 	var result sql.Result
 	result, err = s.stmt[putGroupEvalRecord].Exec(storeID, r.Group(),
 		r.StartTime().Format(formatISO8601), r.EndTime().Format(formatISO8601), r.EndTime().Sub(r.StartTime()).Seconds(),
-		stop, errStr)
+		match, errStr)
 	if err != nil {
 		return err
 	}
@@ -248,17 +248,17 @@ func (s *SQLite3Store) RecordEval(storeID string, r *daemon.EvalRecord) error {
 	for i := 0; i < m; i++ {
 		rr := r.Rule(i)
 		if ruleErr := rr.Err(); err == nil {
-			boolValue := rr.Stop()
-			stop = &boolValue
+			boolValue := rr.Match()
+			match = &boolValue
 			errStr = nil
 		} else {
-			stop = nil
+			match = nil
 			strValue := ruleErr.Error()
 			errStr = &strValue
 		}
 		_, err = s.stmt[putRuleEvalRecord].Exec(groupEvalID, rr.Rule(),
 			rr.StartTime().Format(formatISO8601), rr.EndTime().Format(formatISO8601), rr.EndTime().Sub(rr.StartTime()).Seconds(),
-			stop, errStr)
+			match, errStr)
 		if err != nil {
 			return err
 		}
@@ -332,7 +332,7 @@ CREATE TABLE IF NOT EXISTS group_eval(
 	start_time   TEXT    NOT NULL,
 	end_time     TEXT    NOT NULL,
 	seconds      REAL    NOT NULL,
-	stop         INTEGER,
+	match        INTEGER,
 	err          TEXT,
 
 	FOREIGN KEY(message_id) REFERENCES message(id)
@@ -348,7 +348,7 @@ CREATE TABLE IF NOT EXISTS rule_eval(
 	start_time   	TEXT    NOT NULL,
 	end_time     	TEXT    NOT NULL,
 	seconds      	REAL    NOT NULL,
-	stop         	INTEGER,
+	match         	INTEGER,
 	err          	TEXT,
 
 	FOREIGN KEY(group_eval_id) REFERENCES group_eval(id)
@@ -386,10 +386,10 @@ var (
 			        :from_address, :from_alias, :to_address, :to_alias, :to_list,
 			        :subject, :cc_address, :cc_alias, :cc_list, :sender_address, :sender_alias,
 			        :in_reply_to_id, :thread_topic, :evolution_source, :main_header_json, :full_text)`,
-		`INSERT INTO group_eval(message_id, "group", start_time, end_time, seconds, stop, err)
-			  VALUES (:message_id, :group, :start_time, :end_time, :seconds, :stop, :err)`,
-		`INSERT INTO rule_eval(group_eval_id, rule, start_time, end_time, seconds, stop, err)
-    		  VALUES (:group_eval_id, :rule, :start_time, :end_time, :seconds, :stop, :err)`,
+		`INSERT INTO group_eval(message_id, "group", start_time, end_time, seconds, match, err)
+			  VALUES (:message_id, :group, :start_time, :end_time, :seconds, :match, :err)`,
+		`INSERT INTO rule_eval(group_eval_id, rule, start_time, end_time, seconds, match, err)
+    		  VALUES (:group_eval_id, :rule, :start_time, :end_time, :seconds, :match, :err)`,
 		`INSERT INTO tag(message_id, "key", "value", create_time, create_group, create_rule)
     		  VALUES (:message_id, :key, :value, :time, :group, :rule)
     		      ON CONFLICT(message_id, "key") DO
