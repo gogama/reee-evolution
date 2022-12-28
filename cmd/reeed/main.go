@@ -99,9 +99,6 @@ func runDaemon(parent context.Context, w io.Writer, start time.Time, a *args) er
 	// Get a context that ends when we get a terminating signal.
 	signalCtx, stop := reeeuse.SignalContext(parent)
 
-	// Clean up any old domain socket.
-	cleanupSocket(logger, a.Network, a.Address)
-
 	// Load the rules.
 	groups, err := loadRuleGroups(signalCtx, logger, a)
 	if err != nil {
@@ -145,6 +142,12 @@ func runDaemon(parent context.Context, w io.Writer, start time.Time, a *args) er
 	}
 	log.Normal(logger, "listening...             [network: %s, address: %s]", a.Network, a.Address)
 
+	// Make a best effort to clean up the Unix domain socket on
+	// shutdown.
+	defer func() {
+		cleanupSocket(logger, a.Network, a.Address)
+	}()
+
 	// Start the daemon.
 	d := daemon.Daemon{
 		Listener:  listener,
@@ -185,8 +188,6 @@ func runDaemon(parent context.Context, w io.Writer, start time.Time, a *args) er
 	if err == nil {
 		log.Normal(logger, "stopped.")
 	}
-
-	// TODO: Clean up the Unix domain socket file if it exists.
 
 	return err
 }
