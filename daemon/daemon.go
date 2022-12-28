@@ -223,11 +223,10 @@ func handleEval(ctx *cmdContext) ([]byte, error) {
 		deferredErr = fmt.Errorf("group not found: %s", g)
 	}
 
-	if deferredErr != nil && r != "" {
+	if deferredErr == nil && r != "" {
 		for i := range rules {
 			if r == rules[i].String() {
 				rules = []Rule{rules[i]}
-				r = ""
 				break
 			}
 		}
