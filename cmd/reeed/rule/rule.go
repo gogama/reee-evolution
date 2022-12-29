@@ -23,7 +23,7 @@ func (r *jsRule) String() string {
 	return r.name
 }
 
-func (r *jsRule) Eval(ctx context.Context, logger log.Printer, msg *daemon.Message, tagger daemon.Tagger) (stop bool, err error) {
+func (r *jsRule) Eval(ctx context.Context, logger log.Printer, msg *daemon.Message, tagger daemon.Tagger) (match bool, err error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	err = r.cont.acquire(timeoutCtx)
@@ -41,16 +41,12 @@ func (r *jsRule) Eval(ctx context.Context, logger log.Printer, msg *daemon.Messa
 		return false, err
 	}
 
-	jsStop, err := r.f(m, l)
+	jsMatch, err := r.f(m, l)
 	if err != nil {
 		return false, err
 	}
 
-	stop = jsStop.ToBoolean()
-
-	// TODO: Delete temporary code here
-	log.Verbose(logger, "RULE %s RETURNED %t.", r.name, stop)
-
+	match = jsMatch.ToBoolean()
 	return
 }
 

@@ -9,10 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexflint/go-arg"
 	"github.com/gofrs/uuid"
 	"github.com/gogama/reee-evolution/log"
-
-	"github.com/alexflint/go-arg"
 	"github.com/gogama/reee-evolution/protocol"
 	"github.com/gogama/reee-evolution/version"
 )
