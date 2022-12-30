@@ -2,7 +2,6 @@ package rule
 
 import (
 	"bytes"
-	"fmt"
 	"net/mail"
 	"strings"
 
@@ -40,7 +39,6 @@ func marshalCalendar(cont *vmContainer, calendar *ics.Calendar) (goja.Value, err
 	list := calendar.Events()
 	events := make([]goja.Value, len(list))
 	for i := range list {
-		fmt.Println("HELLO? There's an event here in this list", list[i])
 		event, err := marshalCalendarEvent(cont, list[i])
 		if err != nil {
 			return nil, err
