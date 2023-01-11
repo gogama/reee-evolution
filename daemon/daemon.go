@@ -281,6 +281,7 @@ func handleEval(ctx *cmdContext) ([]byte, error) {
 		}
 	} else {
 		storeID = toStoreID(msg.Envelope, md5Sum)
+		ctx.Verbose("cached message store ID is [%s]", storeID)
 	}
 
 	ger := &EvalRecord{
@@ -312,6 +313,7 @@ func handleEval(ctx *cmdContext) ([]byte, error) {
 		} else if match {
 			ctx.Verbose("rule %s matched.", rules[i])
 			data = "match:" + rules[i].String()
+			i++
 			break
 		}
 	}
