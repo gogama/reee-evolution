@@ -183,12 +183,29 @@ type vmContainer struct {
 }
 
 func (cont *vmContainer) acquire(ctx context.Context) error {
-	// TODO
-	return nil
+	ch := make(chan struct{}, 1)
+	go func() {
+		cont.mu.Lock()
+		ch <- struct{}{}
+	}()
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		// The goroutine above will eventually acquire the lock even
+		// though we no longer need it. Spawn a cleanup goroutine that
+		// waits for that acquisition to complete and then immediately
+		// releases the lock so other callers aren't blocked forever.
+		go func() {
+			<-ch
+			cont.mu.Unlock()
+		}()
+		return ctx.Err()
+	}
 }
 
 func (cont *vmContainer) release() {
-	// TODO
+	cont.mu.Unlock()
 }
 
 type jsGroup struct {
